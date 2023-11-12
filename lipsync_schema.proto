@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+
+message RequestData {
+  string messageuuid = 1;
+  repeated float face = 2 [packed=true];
+  repeated float mel = 3 [packed=true];
+}
+
+message ResponseData{
+  string messageuuid = 1;
+  repeated float face = 2 [packed=true];
+}
+
