@@ -1,13 +1,10 @@
+
 import socket
 import hashlib
-import numpy as np
 import time
 import numpy as np
-import lipsync_schema_pb2
-import uuid
-import threading
-request = lipsync_schema_pb2.RequestData()
-response = lipsync_schema_pb2.ResponseData()
+import threading, inspect
+
 class ML_socket_server():
     def __init__(self, min_time_lapse_ns = 0, 
                  server_address = ('localhost', 5000)):
@@ -16,7 +13,12 @@ class ML_socket_server():
         self.server_socket = None
         self.server_address = server_address
         self.stop_flag = threading.Event()
+    def workload(self):
+        function_name = inspect.currentframe().f_code.co_name
+        raise(NotImplementedError(f"this class method {function_name} need to be overriden"))
     def start(self, server_address = None):
+        if server_address is not None:
+            self.server_address = server_address
         while True:
             try:
                 self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -25,27 +27,30 @@ class ML_socket_server():
                 if self.server_address:
                     self.server_address = self.server_address
                 self.server_socket.bind(self.server_address)
+                print("socket server started")
                 while not self.stop_flag.is_set():
 
                     self.server_socket.listen(1)
 
                     # Accept a client connection
                     client_socket, client_address = self.server_socket.accept()
+                    print(f"accepted client {client_address}")
                     th = threading.Thread(target = self.echo_ml_request, args = [client_socket])
                     th.start()
             except:
                 self.server_socket.close()
-                raise
+                continue
     def echo_ml_request(self, client_socket):
         # Send the serialized data over the network or any other transport mechanism
+        global model
         data_with_checksum = bytes()
         cnt = 0
         while True:
             # Receive data and checksum
             try:
                 
-                data_with_checksum = data_with_checksum + client_socket.recv(1157990000)
-                while len(data_with_checksum) >= 115799:
+                data_with_checksum = data_with_checksum + client_socket.recv(2263490000)
+                while len(data_with_checksum) >= 226349:
                     last_run = time.time() - self.min_time_lapse_ns/ 1e9
                     hash_algo = hashlib.md5()
                     
@@ -70,14 +75,7 @@ class ML_socket_server():
 
                         cnt += 1
                         
-                        request.ParseFromString(received_data) #231546
-                        face = np.array(request.face).reshape([96,96,3])
-                        mel = np.array(request.mel).reshape([80,16])
-                        face = face[list(reversed(range(96))), : ,: ]
-                        response = lipsync_schema_pb2.ResponseData()
-                        response.messageuuid = request.messageuuid
-                        response.face.extend(face.flatten())
-                        serialized_data = response.SerializeToString()
+                        serialized_data = self.workload(received_data)
                         length = len(serialized_data)
                         hash_algo = hashlib.md5()
                         length = str(length).zfill(10).encode()
@@ -96,17 +94,11 @@ class ML_socket_server():
                 
             except ConnectionResetError:
                 # TO_DO: graceful stop
-                print('Connection reset error')
+                print('ConnectionResetError, closing socket, leaving thread')
                 client_socket.close()
                 break
             except ConnectionAbortedError:
+                print('ConnectionAbortedError, closing socket,  leaving thread')
                 client_socket.close()
                 break
-
-    
-
-if __name__ == "__main__":
-    my_ML_socket_server = ML_socket_server()
-    my_ML_socket_server.start()
-
 

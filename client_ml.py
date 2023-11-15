@@ -11,7 +11,7 @@ import time
 #client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 class ML_socket_client():
     def __init__(self, server_address = ('localhost', 5000),
-                 min_time_lapse_ns = 0):
+                 min_time_lapse_ns = 10000):
         self.server_address = server_address
         self.min_time_lapse_ns = min_time_lapse_ns
         self.stop_flag = threading.Event()
@@ -26,7 +26,7 @@ class ML_socket_client():
             try:
                 message = lipsync_schema_pb2.RequestData()
                 message.messageuuid=str(uuid.uuid1())
-                message.face.extend(np.random.rand(96,96,3).flatten()) 
+                message.face.extend(np.random.rand(96,96,6).flatten()) 
                 message.mel.extend(np.random.rand(80,16).flatten())
                 serialized_data = message.SerializeToString()
                 # Calculate checksum

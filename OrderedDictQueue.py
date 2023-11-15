@@ -24,7 +24,10 @@ class BaseOrderedDictQueue():
 
     If maxsize is <= 0, the queue size is infinite.
     '''
-    def first(self):
+    def _first(self):
+        """
+            lockless version that read, recommend to combile with locks
+        """
         for _,v in self.queue.items():
             return v
     def popleft(self):
