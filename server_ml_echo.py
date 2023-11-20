@@ -4,6 +4,8 @@ import hashlib
 import time
 import numpy as np
 import threading, inspect
+import logging
+
 
 class ML_socket_server():
     def __init__(self, min_time_lapse_ns = 0, 
@@ -12,6 +14,7 @@ class ML_socket_server():
 # Create a socket
         self.server_socket = None
         self.server_address = server_address
+        logging.basicConfig(filename='worker_{server_address[0]}{server_address[1]}.log', level=logging.INFO)
         self.stop_flag = threading.Event()
     def workload(self):
         function_name = inspect.currentframe().f_code.co_name
@@ -27,14 +30,14 @@ class ML_socket_server():
                 if self.server_address:
                     self.server_address = self.server_address
                 self.server_socket.bind(self.server_address)
-                print("socket server started")
+                logging.info("socket server started")
                 while not self.stop_flag.is_set():
 
                     self.server_socket.listen(1)
 
                     # Accept a client connection
                     client_socket, client_address = self.server_socket.accept()
-                    print(f"accepted client {client_address}")
+                    logging.info(f"accepted client {client_address}")
                     th = threading.Thread(target = self.echo_ml_request, args = [client_socket])
                     th.start()
             except:
@@ -71,7 +74,7 @@ class ML_socket_server():
                     # Verify checksum
                     if checksum == calculated_checksum:
                         #file.write(received_data)  # Write data to file
-                        print(f'{cnt}checksum correct calculated_checksum={calculated_checksum}, data_with_checksum len={len(data_with_checksum)}')
+                        logging.info(f'{cnt}checksum correct={calculated_checksum}, data_with_checksum len={len(data_with_checksum)}')
 
                         cnt += 1
                         
@@ -90,15 +93,15 @@ class ML_socket_server():
                         client_socket.sendall(calculated_checksum.encode() + length + serialized_data)
                         last_run = cur_time
                     else:
-                        print("Checksum mismatch. Data corrupted.")
+                        logging.info("Checksum mismatch. Data corrupted.")
                 
             except ConnectionResetError:
                 # TO_DO: graceful stop
-                print('ConnectionResetError, closing socket, leaving thread')
+                logging.info('ConnectionResetError, closing socket, leaving thread')
                 client_socket.close()
                 break
             except ConnectionAbortedError:
-                print('ConnectionAbortedError, closing socket,  leaving thread')
+                logging.info('ConnectionAbortedError, closing socket,  leaving thread')
                 client_socket.close()
                 break
 
