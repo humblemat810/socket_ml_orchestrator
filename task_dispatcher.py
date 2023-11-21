@@ -180,34 +180,33 @@ class Worker(ABC):
                     logger.debug(f"Worker{self.id}.map waiting queue_pending.not_empty")
                     self.queue_pending.not_empty.wait()
                     logger.debug(f"Worker{self.id}.map waited queue_pending.not_empty")
-            
+            task_info = self.queue_pending._first()
+            if task_info is not None:
+                data_for_dispatch = self.prepare_for_dispatch(task_info)
+                logger.debug(f"Worker{self.id}.map acquring queue_dispatched.mutex")
+                with self.queue_dispatched.mutex:
+                    logger.debug(f"Worker{self.id}.map acqured queue_dispatched.mutex")
+                    while len(self.queue_dispatched) >= self.dispatched_task_limit:
+                        logger.debug(f"Worker{self.id}.map waiting queue_dispatched.not_full")
+                        self.queue_dispatched.not_full.wait()
+                        logger.debug(f"Worker{self.id}.map waited queue_dispatched.not_full")
+
+
+                    self.dispatch(data_for_dispatch)
+                    logger.debug(f"Worker{self.id}.map returned from dispatch")
+                    self.queue_dispatched._put(task_info[0], task_info[1]) # (time, id), user data
+                    logger.debug(f"Worker{self.id}.map dispatched_task_limit notifying")
+                    if len(self.queue_dispatched) < self.dispatched_task_limit:
+                        self.queue_dispatched.not_full.notify()
+                    self.queue_dispatched.not_empty.notify()
+                    logger.debug(f"Worker{self.id}.map dispatched_task_limit notified")
+            else:
+                logger.warning("empty still passed not_empty condition")
             task_info = self.queue_pending._popleft()
             if len(self.queue_pending) > 0:
                 self.queue_pending.not_empty.notify()
                 self.queue_pending.not_full.notify()
             logger.debug(f"Worker{self.id}.map queue_pending notify")
-        
-        if task_info is not None:
-            data_for_dispatch = self.prepare_for_dispatch(task_info)
-            logger.debug(f"Worker{self.id}.map acquring queue_dispatched.mutex")
-            with self.queue_dispatched.mutex:
-                logger.debug(f"Worker{self.id}.map acqured queue_dispatched.mutex")
-                while len(self.queue_dispatched) >= self.dispatched_task_limit:
-                    logger.debug(f"Worker{self.id}.map waiting queue_dispatched.not_full")
-                    self.queue_dispatched.not_full.wait()
-                    logger.debug(f"Worker{self.id}.map waited queue_dispatched.not_full")
-
-
-                self.dispatch(data_for_dispatch)
-                logger.debug(f"Worker{self.id}.map returned from dispatch")
-                self.queue_dispatched._put(task_info[0], task_info[1]) # (time, id), user data
-                logger.debug(f"Worker{self.id}.map dispatched_task_limit notifying")
-                if len(self.queue_dispatched) < self.dispatched_task_limit:
-                    self.queue_dispatched.not_full.notify()
-                self.queue_dispatched.not_empty.notify()
-                logger.debug(f"Worker{self.id}.map dispatched_task_limit notified")
-        else:
-            logger.warning("empty still passed not_empty condition")
             # task_info in format ((assignment_time, task_id), task data )
         
 
@@ -244,7 +243,17 @@ class Worker(ABC):
             logger.debug(f"Worker{self.id}._reduce acquired queue_dispatched.mutex")
             if task_info in self.queue_dispatched.queue:
                 task_id = task_info[1]
-                
+                logger.debug("_reduce waiting q_task_completed.not_full")
+                with self.task_manager.q_task_completed.not_full:
+                    logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full condition")
+                    if self.task_manager.q_task_completed._qsize() >= self.task_manager.q_task_completed_limit:
+                        logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
+                        self.task_manager.q_task_completed.not_full.wait()
+                    logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full")
+                    record = (task_info, map_result)
+                    self.task_manager.q_task_completed._put(record)
+                    self.task_manager.q_task_completed.not_empty.notify()
+                logger.debug(f"Worker{self.id}._reduce finish")
                 # MAY NOT NEED NOTIFY
                 self.queue_dispatched.queue.pop(task_info)
                 logger.debug(f"Worker{self.id}._reduce queue_dispatched notify")
@@ -264,17 +273,7 @@ class Worker(ABC):
                 "task not exist, maybe reduced by other worker, or this is a retry but the original task"
                 "completed when retry task is pending, i.e. original may race with current, when retry function implemented"
                 pass
-        logger.debug("_reduce waiting q_task_completed.not_full")
-        with self.task_manager.q_task_completed.not_full:
-            logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full condition")
-            if self.task_manager.q_task_completed._qsize() >= self.task_manager.q_task_completed_limit:
-                logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
-                self.task_manager.q_task_completed.not_full.wait()
-            logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full")
-            record = (task_info, map_result)
-            self.task_manager.q_task_completed._put(record)
-            self.task_manager.q_task_completed.not_empty.notify()
-        logger.debug(f"Worker{self.id}._reduce finish")
+        
     def add_task(self, id, data, *arg, priority = None):
         # by default, first in should be prioritised such that redoing old task
         # will have highest priority
@@ -567,7 +566,7 @@ class Task_Worker_Manager():
                 dq.not_full.notify()
 
     def start(self):
-        th = Thread(target = self.assign_task, args = [], name='task work manager assign task')
+        th = Thread(target = self.assign_task2, args = [], name='task work manager assign task')
         th.start()
         self.th_assign_task = th
         self._worker_sorter.start()
@@ -592,13 +591,16 @@ class Task_Worker_Manager():
                 #        with TimerContext("Task Work Man Asgn "):
                             self.q_task_outstanding.not_empty.wait()
                     
+                        
+                    packed = self.q_task_outstanding._first()
+                    task_id, data = packed
+                    self._worker_sorter.add_task(task_id, data)
                     packed = self.q_task_outstanding._popleft()
                     if packed is None:
                         logger.warning("pop should not happen when empty, tracker has error")
                     if len(self.q_task_outstanding) > 0:
                         self.q_task_outstanding.not_empty.notify()
-                task_id, data = packed
-                self._worker_sorter.add_task(task_id, data)    
+                    
 
                     
             except Exception as e :
