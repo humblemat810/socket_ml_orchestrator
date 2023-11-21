@@ -1,7 +1,8 @@
 '''A multi-producer, multi-consumer queue.'''
 
 import threading
-import types
+from typing import TypeVar
+
 from collections import OrderedDict
 from time import monotonic as time
 
@@ -18,7 +19,6 @@ class Full(Exception):
     pass
 
 
-
 class BaseOrderedDictQueue():
     '''Create a queue object with a given maximum size.
 
@@ -26,14 +26,26 @@ class BaseOrderedDictQueue():
     '''
     def _first(self):
         """
-            lockless version that read, recommend to combile with locks
+            lockless version that read, recommend to combine with locks
         """
-        for _,v in self.queue.items():
-            return v
-    def popleft(self):
-        for k,_ in self.queue.items():
-            return self.queue.pop(k)
+        for item in self.queue.items():
+            return item
+    def __len__(self):
+        return len(self.queue)
+    def _popleft(self):
         
+        for k,_ in self.queue.items():
+            v = self.queue.pop(k)
+            self.not_full.notify()
+            return (k, v)
+        self.not_full.notify()
+        return 
+    def __getitem__(self, key):
+        return self.queue[key]
+    def __setitem__(self, key, value):
+        with self.not_empty:
+            self.queue[key] = value
+            self.not_empty.notify()
     def __init__(self, BaseType, maxsize=0):
         self.maxsize = maxsize
         self._init(BaseType, maxsize)
@@ -122,7 +134,7 @@ class BaseOrderedDictQueue():
         with self.mutex:
             return 0 < self.maxsize <= self._qsize()
 
-    def put(self, item, block=True, timeout=None):
+    def put(self, key, item, block=True, timeout=None):
         '''Put an item into the queue.
 
         If optional args 'block' is true and 'timeout' is None (the default),
@@ -150,11 +162,11 @@ class BaseOrderedDictQueue():
                         if remaining <= 0.0:
                             raise Full
                         self.not_full.wait(remaining)
-            self._put(item)
+            self._put(key,item)
             self.unfinished_tasks += 1
             self.not_empty.notify()
 
-    def get(self, block=True, timeout=None):
+    def get(self, key = None, block=True, timeout=None):
         '''Remove and return an item from the queue.
 
         If optional args 'block' is true and 'timeout' is None (the default),
@@ -181,17 +193,17 @@ class BaseOrderedDictQueue():
                     if remaining <= 0.0:
                         raise Empty
                     self.not_empty.wait(remaining)
-            item = self._get()
+            item = self._get(key = key)
             self.not_full.notify()
             return item
 
-    def put_nowait(self, item):
+    def put_nowait(self, key, item):
         '''Put an item into the queue without blocking.
 
         Only enqueue the item if a free slot is immediately available.
         Otherwise raise the Full exception.
         '''
-        return self.put(item, block=False)
+        return self.put(key, item, block=False)
 
     def get_nowait(self):
         '''Remove and return an item from the queue without blocking.
@@ -208,6 +220,7 @@ class BaseOrderedDictQueue():
     # Initialize the queue representation
     def _init(self, BaseType, maxsize):
         self.queue = BaseType()
+        self.maxsize = maxsize
 
     def _qsize(self):
         return len(self.queue)
@@ -219,16 +232,107 @@ class BaseOrderedDictQueue():
         self.queue[key] = item
 
     # Get an item from the queue
-    def _get(self):
-        return self.queue.popleft()
+    def _get(self, key = None):
+        if key is None:
+            return self._popleft()
+        else:
+            return self[key]
 
 
 class OrderedDictQueue(BaseOrderedDictQueue):
     def __init__(self, maxsize=0):
-        super().__init__(BaseType=OrderedDict)
+        super().__init__(BaseType=OrderedDict, maxsize=maxsize)
         pass
 
 class dictQueue(BaseOrderedDictQueue):
     def __init__(self, maxsize=0):
-        super().__init__(BaseType=dict)
+        super().__init__(BaseType=dict, maxsize=maxsize)
         pass
+class IndexedPriorityQueue(BaseOrderedDictQueue):
+    def __init__(self, maxsize=0):
+        super().__init__(BaseType=_IndexedPriorityQueue, maxsize=maxsize)
+        pass
+class _IndexedPriorityQueue():
+    def __init__(self, maxsize=0):
+        self.maxsize = maxsize
+        self.heap = []
+        self.index_map = {}
+
+    def is_empty(self):
+        return len(self.heap) == 0
+
+    def size(self):
+        return len(self.heap)
+
+    def contains(self, index):
+        return index in self.index_map
+
+    def insert(self, index, priority):
+        if self.contains(index):
+            raise ValueError("Index already exists in the priority queue.")
+        self.heap.append((index, priority))
+        self.index_map[index] = len(self.heap) - 1
+        self._upheap(len(self.heap) - 1)
+
+    def update(self, index, new_priority):
+        if not self.contains(index):
+            raise ValueError("Index does not exist in the priority queue.")
+        heap_index = self.index_map[index]
+        old_priority = self.heap[heap_index][1]
+        self.heap[heap_index] = (index, new_priority)
+        if new_priority < old_priority:
+            self._upheap(heap_index)
+        else:
+            self._downheap(heap_index)
+
+    def pop_by_index(self, index):
+        if not self.contains(index):
+            raise ValueError("Index does not exist in the priority queue.")
+        heap_index = self.index_map[index]
+        del self.index_map[index]
+        if heap_index == len(self.heap) - 1:
+            return self.heap.pop()
+        else:
+            self._swap(heap_index, len(self.heap) - 1)
+            to_return = self.heap.pop()
+            self._downheap(heap_index)
+            return to_return
+    
+    def get_min(self):
+        if self.is_empty():
+            raise ValueError("Priority queue is empty.")
+        return self.heap[0]
+
+    def extract_min(self):
+        min_element = self.get_min()
+        self.delete(min_element[0])
+        return min_element
+
+    def _upheap(self, i):
+        while i > 0:
+            parent = (i - 1) // 2
+            if self.heap[i][1] < self.heap[parent][1]:
+                self._swap(i, parent)
+                i = parent
+            else:
+                break
+
+    def _downheap(self, i):
+        while True:
+            left_child = 2 * i + 1
+            right_child = 2 * i + 2
+            smallest = i
+            if left_child < len(self.heap) and self.heap[left_child][1] < self.heap[smallest][1]:
+                smallest = left_child
+            if right_child < len(self.heap) and self.heap[right_child][1] < self.heap[smallest][1]:
+                smallest = right_child
+            if smallest != i:
+                self._swap(i, smallest)
+                i = smallest
+            else:
+                break
+
+    def _swap(self, i, j):
+        self.heap[i], self.heap[j] = self.heap[j], self.heap[i]
+        self.index_map[self.heap[i][0]] = i
+        self.index_map[self.heap[j][0]] = j
