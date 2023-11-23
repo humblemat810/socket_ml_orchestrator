@@ -15,8 +15,9 @@ class ReconnectingSocket:
         #self.th_reconnecting_watchdog.start()
         self.last_reconnect_time = time.time()
         self.reconnect_interval = 2
+        self.retry_enabled = True
     def reconnecting_watchdog(self):
-        while True:
+        while self.retry_enabled:
             self.reconnecting_needed.wait()
             with self.reconnecting_lock:
                 if time.time() - self.last_reconnect_time < self.reconnect_interval:
@@ -24,7 +25,7 @@ class ReconnectingSocket:
                     self.last_reconnect_time = time.time()
                     self.reconnecting_needed.clear()
     def connect(self):
-        while True:
+        while self.retry_enabled:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect((self.host, self.port))
@@ -37,7 +38,7 @@ class ReconnectingSocket:
                 time.sleep(self.reconnect_interval)
 
     def sendall(self, data):
-        while True:
+        while self.retry_enabled:
             try:
                 self.sock.sendall(data)
                 #print("Data sent successfully\n").then
@@ -49,7 +50,7 @@ class ReconnectingSocket:
                     self.reconnecting_needed.set()
                 time.sleep(self.reconnect_interval)
     def recv(self, buffer_size):
-        while True:
+        while self.retry_enabled:
             try:
                 data = self.sock.recv(buffer_size)
                 #print("Data received successfully\n")

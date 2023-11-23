@@ -250,7 +250,9 @@ class dictQueue(BaseOrderedDictQueue):
         pass
 class IndexedPriorityQueue(BaseOrderedDictQueue):
     def __init__(self, maxsize=0):
+        self.queue: _IndexedPriorityQueue
         super().__init__(BaseType=_IndexedPriorityQueue, maxsize=maxsize)
+        
         pass
 class _IndexedPriorityQueue():
     def __init__(self, maxsize=0):

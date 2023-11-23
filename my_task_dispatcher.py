@@ -66,10 +66,18 @@ class My_Worker(Worker):
         self.map_result_buffer = queue.Queue()
         self.watermark = time.time()
         self.output_minibatch_size = 24
+    def graceful_stop(self):
+        super().graceful_stop()
+        if self.is_local:
+            pass
+        else:
+            self.client_socket.retry_enabled = False
+        
     def result_buffer_collect(self):
         
         
         client_socket = self.client_socket
+        client_socket.sock.settimeout(2)
         data_with_checksum = bytes()
         self.socket_last_run = time.time()
         cnt = 0
@@ -80,10 +88,15 @@ class My_Worker(Worker):
                 #     # sleep to wait for data coming in to save the thread
 
                 #     pass
-                data_with_checksum = data_with_checksum + client_socket.recv(115757000)
+                try:
+                    data = client_socket.recv(115757000)
+                except socket.timeout as te:
+                    continue # check for stop event
+                
+                data_with_checksum = data_with_checksum + data
                 logger.debug('worker data received')
                 #print(f"receive non cond: {len(data_with_checksum)}")
-                while len(data_with_checksum) >= 110000:
+                while not self.stop_flag.is_set() and (len(data_with_checksum) >= 110000):
                     #print(f"receive cond: {len(data_with_checksum)}")
                     hash_algo = hashlib.md5()
                     
@@ -96,7 +109,10 @@ class My_Worker(Worker):
                     calculated_checksum = hash_algo.hexdigest()
                     
                     if checksum == calculated_checksum:
-                        self.map_result_buffer.put(received_data)
+                        try:
+                            self.map_result_buffer.put(received_data, timeout = 1)
+                        except queue.Full:
+                            continue
                         data_with_checksum = data_with_checksum[42+length:]
                     
                         time_now =  time.time() 
@@ -130,9 +146,13 @@ class My_Worker(Worker):
         #merge data to face 
         pass
     def _map_result_watcher(self):
-        while True:
+        while not self.stop_flag.is_set():
             logger.debug('start listen map result')
-            result = self.map_result_buffer.get()
+            from queue import Empty
+            try:
+                result = self.map_result_buffer.get(timeout=1)
+            except Empty:
+                continue
             logger.debug('map result read')
             response = lipsync_schema_pb2.ResponseData()
             response.ParseFromString(result) 
@@ -202,7 +222,7 @@ if __name__ == '__main__':
     logger.debug('signal start')
     def dispatch_from_main():
         cnt = 0
-        while True:
+        while not my_task_worker_manager.stop_flag.is_set():
             cnt+=1
             frame_data = {'data_ref','k'+str(cnt)}#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}
             my_task_worker_manager.dispatch(frame_data)
@@ -214,6 +234,11 @@ if __name__ == '__main__':
 
     th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
-    while True:
+    while not my_task_worker_manager.stop_flag.is_set():
         time.sleep(0.4)
-
+    while True:
+        try:
+            my_task_worker_manager.graceful_stopped.wait(timeout=2)
+        except:
+            continue
+        break

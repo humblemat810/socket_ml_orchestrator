@@ -1,23 +1,23 @@
 import logging
 
 # Create a logger
-logger = logging.getLogger('my_task_dispatcher')
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger()
+# logger.setLevel(logging.DEBUG)
 
-# # Create a console handler and set its format
-console_handler = logging.StreamHandler()
-#formatter = logging.Formatter("%(levelname)s - %(message)s")
-formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s")
-console_handler.setFormatter(formatter)
+# # # Create a console handler and set its format
+# console_handler = logging.StreamHandler()
+# #formatter = logging.Formatter("%(levelname)s - %(message)s")
+# formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s")
+# console_handler.setFormatter(formatter)
 
-# Add the console handler to the logger
-logger.addHandler(console_handler)
-fh = logging.FileHandler('my_task_dispatcher.log', mode='w', encoding='utf-8')
-fh.setLevel(logging.DEBUG)
-fh.setFormatter(formatter)
-logger.addHandler(fh)
+# # Add the console handler to the logger
+# logger.addHandler(console_handler)
+# fh = logging.FileHandler('my_task_dispatcher.log', mode='w', encoding='utf-8')
+# fh.setLevel(logging.DEBUG)
+# fh.setFormatter(formatter)
+# logger.addHandler(fh)
 logger.debug('start loading module task_dispatcher.py')
-
+transaction_mode = False
 import socket
 import  queue
 import OrderedDictQueue
@@ -26,7 +26,7 @@ import time
 import inspect
 from typing import List, Dict
 import datetime
-
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from contextlib import contextmanager
 debug = True
 stop_event = Event()
@@ -114,8 +114,12 @@ class Worker(ABC):
         self.pending_task_limit = pending_task_limit# min(pending_task_limit, self.task_manager.output_minibatch_size)
         self.dispatched_task_limit = 12 # must be greater than or equal to minibatch limit
         self.id = id
+        self.th_map: Thread
+        self.th_map_result_watch: Thread
         self.queue_pending = self.task_manager.worker_pending[self.id]
         self.queue_dispatched = self.task_manager.worker_dispatched[self.id]
+        self.stop_flag = Event()
+        self.graceful_stopped = Event()
         with self.queue_dispatched.not_full:
             self.queue_dispatched.not_full.notify()
         with self.queue_pending.not_full:
@@ -127,6 +131,11 @@ class Worker(ABC):
         
         
         # TO-DO initialize remote connection
+    def graceful_stop(self):
+        self.stop_flag.set()
+        self.th_map.join()
+        self.th_map_result_watch.join()
+        self.graceful_stopped.set()
     def get_next_task(self):
         return self.queue_pending._first()
     def __len__(self): # number of total task
@@ -138,7 +147,7 @@ class Worker(ABC):
         pass
     def start(self):
         def to_th_map():
-            while True:
+            while not self.stop_flag.is_set():
                 try:
                     self.map()                        
                 except Exception as e:
@@ -148,8 +157,9 @@ class Worker(ABC):
 
         th_map = Thread(target = to_th_map, args = [], name=f'{self.id} worker map')
         th_map.start()
+        self.th_map = th_map
         def to_th_reduce():
-            while True:
+            while not self.stop_flag.is_set():
                 try:
                     self._map_result_watcher()
                 except Exception as e:
@@ -157,6 +167,7 @@ class Worker(ABC):
                     raise
         th_map_result_watch = Thread(target = to_th_reduce, args = [],name=f'{self.id} worker watcher')
         th_map_result_watch.start()
+        self.th_map_result_watch = th_map_result_watch
     @abstractmethod
     def dispatch(self):
         pass
@@ -175,29 +186,33 @@ class Worker(ABC):
         logger.debug(f"Worker{self.id}.map acquiring queue_pending.mutex")
         with self.queue_pending.mutex:
             logger.debug(f"Worker{self.id}.map acquired queue_pending.mutex")
-            if len(self.queue_pending) <= 0:
-                #with TimerContext("Worker map"):
+            while (len(self.queue_pending) <= 0) and not self.stop_flag.is_set():
+                try:
                     logger.debug(f"Worker{self.id}.map waiting queue_pending.not_empty")
-                    self.queue_pending.not_empty.wait()
-                    logger.debug(f"Worker{self.id}.map waited queue_pending.not_empty")
-            
+                    self.queue_pending.not_empty.wait(timeout = 2)
+                except:
+                    continue
+            if self.stop_flag.is_set():
+                return False
+            logger.debug(f"Worker{self.id}.map waited queue_pending.not_empty")
             task_info = self.queue_pending._popleft()
             if len(self.queue_pending) > 0:
                 self.queue_pending.not_empty.notify()
                 self.queue_pending.not_full.notify()
-            logger.debug(f"Worker{self.id}.map queue_pending notify")
-        
         if task_info is not None:
             data_for_dispatch = self.prepare_for_dispatch(task_info)
             logger.debug(f"Worker{self.id}.map acquring queue_dispatched.mutex")
             with self.queue_dispatched.mutex:
                 logger.debug(f"Worker{self.id}.map acqured queue_dispatched.mutex")
-                while len(self.queue_dispatched) >= self.dispatched_task_limit:
+                while (len(self.queue_dispatched) >= self.dispatched_task_limit) and not self.stop_flag.is_set():
                     logger.debug(f"Worker{self.id}.map waiting queue_dispatched.not_full")
-                    self.queue_dispatched.not_full.wait()
-                    logger.debug(f"Worker{self.id}.map waited queue_dispatched.not_full")
-
-
+                    try:
+                        self.queue_dispatched.not_full.wait(timeout = 2)
+                    except:
+                        continue
+                if self.stop_flag.is_set():
+                    return False
+                logger.debug(f"Worker{self.id}.map waited queue_dispatched.not_full")
                 self.dispatch(data_for_dispatch)
                 logger.debug(f"Worker{self.id}.map returned from dispatch")
                 self.queue_dispatched._put(task_info[0], task_info[1]) # (time, id), user data
@@ -208,6 +223,8 @@ class Worker(ABC):
                 logger.debug(f"Worker{self.id}.map dispatched_task_limit notified")
         else:
             logger.warning("empty still passed not_empty condition")
+            
+        logger.debug(f"Worker{self.id}.map queue_pending notify")
             # task_info in format ((assignment_time, task_id), task data )
         
 
@@ -244,7 +261,9 @@ class Worker(ABC):
             logger.debug(f"Worker{self.id}._reduce acquired queue_dispatched.mutex")
             if task_info in self.queue_dispatched.queue:
                 task_id = task_info[1]
+                logger.debug("_reduce waiting q_task_completed.not_full")
                 
+                logger.debug(f"Worker{self.id}._reduce finish")
                 # MAY NOT NEED NOTIFY
                 self.queue_dispatched.queue.pop(task_info)
                 logger.debug(f"Worker{self.id}._reduce queue_dispatched notify")
@@ -264,18 +283,23 @@ class Worker(ABC):
                 "task not exist, maybe reduced by other worker, or this is a retry but the original task"
                 "completed when retry task is pending, i.e. original may race with current, when retry function implemented"
                 pass
-        logger.debug("_reduce waiting q_task_completed.not_full")
         with self.task_manager.q_task_completed.not_full:
             logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full condition")
-            if self.task_manager.q_task_completed._qsize() >= self.task_manager.q_task_completed_limit:
-                logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
-                self.task_manager.q_task_completed.not_full.wait()
+            logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
+            while (not self.stop_flag.is_set() 
+                   and self.task_manager.q_task_completed._qsize() >= self.task_manager.q_task_completed_limit):
+                try:
+                    self.task_manager.q_task_completed.not_full.wait(timeout = 2)
+                except:
+                    continue
+            if self.stop_flag.is_set() :
+                return False # will be treated as unfinished dispatch
             logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full")
             record = (task_info, map_result)
             self.task_manager.q_task_completed._put(record)
             self.task_manager.q_task_completed.not_empty.notify()
-        logger.debug(f"Worker{self.id}._reduce finish")
     def add_task(self, id, data, *arg, priority = None):
+        # no nesting
         # by default, first in should be prioritised such that redoing old task
         # will have highest priority
         # bug here when stoped it will return wrong !!!!!!!!!!!
@@ -285,9 +309,14 @@ class Worker(ABC):
         logger.debug(f"Worker{self.id}.add_task acquiring queue_pending.mutex")
         with self.queue_pending.not_full:
             logger.debug(f"Worker{self.id}.add_task acquired queue_pending.mutex")
-            if len(self.queue_pending) >= self.pending_task_limit:
+            while (len(self.queue_pending) >= self.pending_task_limit) and not self.stop_flag.is_set():
                 logger.debug(f"Worker{self.id}.add_task acquired queue_pending.mutex")
-                self.queue_pending.not_full.wait()
+                try:
+                    self.queue_pending.not_full.wait(timeout = 2)
+                except:
+                    continue
+            if self.stop_flag.is_set():
+                return False
             self.queue_pending._put((priority,id), data)
             logger.debug(f"Worker{self.id}.add_task before notify")
             self.queue_pending.not_empty.notify()
@@ -296,25 +325,36 @@ class Worker(ABC):
                             "assigned_to" : self.id} # worker id
             self.worker_manager.update_sort(index_in_sorter=0, change = 1)
         logger.debug(f"Worker{self.id}.add_task finish")
-            
+        return True
     def add_task2 (self, *arg, priority = None):
         if priority is None:
             priority = time.time()
         logger.debug(f"Worker{self.id}.add_task2 acquiring queue_pending.mutex")
         with self.queue_pending.not_full:
             logger.debug(f"Worker{self.id}.add_task2 has acquried queue_pending.mutex")
-            if self.queue_pending._qsize() > self.queue_pending.maxsize:
+            while (not self.stop_flag.is_set() and 
+                   (self.queue_pending._qsize() > self.queue_pending.maxsize)):
                 logger.debug(f"Worker{self.id}.add_task2 is waiting for queue_pending.not_full")
-                self.queue_pending.not_full.wait()
-                logger.debug(f"Worker{self.id}.add_task2 queue_pending is not full")
+                try:
+                    self.queue_pending.not_full.wait(timeout = 2)
+                except:
+                    continue
+            if self.stop_flag.is_set():
+                return
+            logger.debug(f"Worker{self.id}.add_task2 queue_pending is not full")
+            
             logger.debug(f"Worker{self.id}.add_task2 acquiring q_task_outstanding.not_empty")
             with self.task_manager.q_task_outstanding.not_empty:
                 logger.debug(f"Worker{self.id}.add_task2 has acquired q_task_outstanding.not_empty")
-                if len(self.task_manager.q_task_outstanding) <= 0:
-                    #with TimerContext("Task Work Man Asgn "):
+                while (len(self.task_manager.q_task_outstanding) <= 0) and not self.stop_flag.is_set():
+                    try:
                         logger.debug(f"Worker{self.id}.add_task2 is waiting for queue_pending.not_empty")
-                        self.task_manager.q_task_outstanding.not_empty.wait()
-                        logger.debug(f"Worker{self.id}.add_task2 is waiting for queue_pending.not_empty")
+                        self.task_manager.q_task_outstanding.not_empty.wait(timeout = 2)
+                    except:
+                        continue
+                if self.stop_flag.is_set():
+                    return False
+                logger.debug(f"Worker{self.id}.add_task2 is waiting for queue_pending.not_empty")
                 packed = self.task_manager.q_task_outstanding._first()
                 if packed is None:
                     logger.warning("empty but still has not_empty, work number tracker has error")
@@ -351,13 +391,13 @@ class Worker_Sorter():
         self.worker_list :List[Worker] = [] 
         self.worker_by_id : Dict[int,Worker] = {}
         self.new_worker_id = 0
-        
+        self.graceful_stopped = Event()
         self.worker_list_lock = Lock()
         # alias
         self.task_manager = task_manager
         self.task_retry_timeout = self.task_manager.task_retry_timeout
         self.q_task_completed = self.task_manager.q_task_completed
-        
+        self.stop_flag = Event()
         for config in task_manager.worker_config:
             self.add_worker(config)
             # self.worker_list.append(self.worker_factory(worker_manager = self,
@@ -455,12 +495,17 @@ class Worker_Sorter():
         else:
             free_worker = self.worker_by_id[worker_id]
         logger.debug("Worker_sorter.add_task freest worker found")
-        free_worker.add_task( task_id, data)
+        success = free_worker.add_task( task_id, data)
+        if success:
+            pass
+        else:
+            return False
             
         task_assignment[task_id] = {
                          'task_data': data, 
                          "assigned_to" : free_worker.id} # worker id
         self.update_sort(index_in_sorter=0, change = 1)
+        return True
     def add_task2(self, *arg, worker_id = None):
         logger.debug("Worker_sorter.add_task2 finding freest worker")
         if worker_id is None:
@@ -479,16 +524,18 @@ class Worker_Sorter():
 
             
     def check_workers_timeout_retry(self):
-        while True:
+        while not self.stop_flag.is_set():
             for worker in self.worker_by_id.values():
+                if self.stop_flag.is_set():
+                    continue
                 with worker.queue_dispatched.not_empty:
-                    if worker.queue_dispatched._qsize() <= 0:
-                        worker.queue_dispatched.not_empty.wait()
+                    if (worker.queue_dispatched._qsize() <= 0):
+                        continue
+                    
                     while worker.queue_dispatched._qsize() > 0:
                         task_info, task_data = worker.queue_dispatched._first()
                         timenow = time.time()
                         if timenow - task_info[0] > self.task_manager.task_retry_timeout:
-                            
                             worker.queue_dispatched.queue.pop(task_info)
                             self.update_sort(index_in_sorter=worker.index_in_sorter, change = -1)
                             """
@@ -497,8 +544,8 @@ class Worker_Sorter():
             check_workers_timeout_retry holds: queue_dispatched     waiting for : q_task_outstanding
             ding ding: dead lock cycle
                             """                        
-                            self.task_manager.dispatch(task_data, ignore_size_check = True) # use outstanding
-                            worker.queue_dispatched.not_full.notify()
+                            if self.task_manager.dispatch(task_data, ignore_size_check = True): # use outstanding
+                                worker.queue_dispatched.not_full.notify()
                             if worker.queue_dispatched._qsize() > 0:
                                 worker.queue_dispatched.not_empty.notify()
                         else:
@@ -519,7 +566,16 @@ class Worker_Sorter():
             th_retry_watch = Thread(target= self.check_workers_timeout_retry, name = 'worker timeout watcher')
             th_retry_watch.start()
             self.th_retry_watch = th_retry_watch
-
+    def graceful_stop(self):
+        self.stop_flag.set()
+        
+        for id, worker in self.worker_by_id.items():
+            Thread(target = worker.graceful_stop).start()
+        for id, worker in self.worker_by_id.items():
+            worker.graceful_stopped.wait()
+        self.th_retry_watch.join()
+        self.graceful_stopped.set()
+        
 class Task_Worker_Manager():
     """
     Entry point of object
@@ -548,12 +604,69 @@ class Task_Worker_Manager():
         self.th_assign = None
         self.th_clean_up = None
         self.stop = False
+        self.stop_flag = Event()
         self.watermark = time.time()
         self.water_mark_lookback = 60
         self.watermark_check = False
         self._worker_sorter = self.worker_sorter_factory(sorting_algo = 'heapq', task_manager = self, worker_factory=worker_factory)
         self.worker_factory = self._worker_sorter.worker_factory
         self.init_locks()
+        self.manager_port = 59842
+        self.graceful_stopped = Event()
+        #self.init_manager(port=self.manager_port)
+        self.set_manage_httpd()
+    def graceful_stop(self):
+        self.stop_flag.set()
+        self._worker_sorter.graceful_stop()
+        self._worker_sorter.graceful_stopped.wait()
+        self.th_assign.join()
+        self.th_clean_up.join()
+        self.graceful_stopped.set()
+    def set_manage_httpd(self):
+        mytaskworker = self
+        class MyHandler(BaseHTTPRequestHandler):
+            def _send_response(self, status_code, message):
+                self.send_response(status_code)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(message.encode('utf-8'))
+
+            def do_GET(self):
+                if self.path == '/shutdown':
+                    mytaskworker.stop_flag.set()
+                    mytaskworker.graceful_stop()
+                    
+                    Thread(target=httpd.shutdown, daemon=True).start()
+                    self._send_response(200, "Shutdown requested\n")
+                else:
+                    self._send_response(404, "Not found\n")
+
+        
+        server_address = ('', 18465)
+        httpd = HTTPServer(server_address, MyHandler)
+        self.httpd = httpd
+        def start_server():
+            
+            httpd.serve_forever()
+        self.th_httpd = Thread(target = start_server)
+        self.th_httpd.start()
+    def listen_manager(self):
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(self.server_address)
+        while not self.stop_flag.is_set():
+            self.server_socket.listen(1)
+
+            # Accept a client connection
+            client_socket, client_address = self.server_socket.accept()
+            
+            self.logger.info(f"start accepted client {client_address}")
+            
+    def init_manager(self, port = None):
+        if port is None:
+            port = self.manager_port
+        self.th_manage = Thread(target = self.listen_manager)
+        
+        
     def init_locks(self):
         with self.q_task_outstanding.not_full:
             self.q_task_outstanding.not_full.notify()
@@ -569,9 +682,9 @@ class Task_Worker_Manager():
     def start(self):
         th = Thread(target = self.assign_task, args = [], name='task work manager assign task')
         th.start()
-        self.th_assign_task = th
-        self._worker_sorter.start()
         self.th_assign = th
+        self._worker_sorter.start()
+        
         th = Thread(target = self.on_task_complete, args = [], name='task work manager task complete')
         th.start()
         self.th_clean_up = th
@@ -581,25 +694,29 @@ class Task_Worker_Manager():
         """
         assign task from outstanding to worker
         """
-        
-        while not self.stop:
+        self.assign_task_called += 1
+        logger.debug(f"Task_Worker_Manager.assign_task called {self.assign_task_called}")
+        while not self.stop_flag.is_set():
             try:
-                self.assign_task_called += 1
-                logger.debug(f"Task_Worker_Manager.assign_task called {self.assign_task_called}")
                 with self.q_task_outstanding.not_empty:
-                    
-                    if len(self.q_task_outstanding) <= 0:
+                    while (len(self.q_task_outstanding) <= 0) and not self.stop_flag.is_set():
                 #        with TimerContext("Task Work Man Asgn "):
-                            self.q_task_outstanding.not_empty.wait()
-                    
+                            try:
+                                self.q_task_outstanding.not_empty.wait(timeout = 2)
+                            except Exception as e:
+                                continue
+                    if self.stop_flag.is_set():
+                        continue
                     packed = self.q_task_outstanding._popleft()
                     if packed is None:
                         logger.warning("pop should not happen when empty, tracker has error")
+                        continue
                     if len(self.q_task_outstanding) > 0:
                         self.q_task_outstanding.not_empty.notify()
                 task_id, data = packed
-                self._worker_sorter.add_task(task_id, data)    
-
+                success = self._worker_sorter.add_task(task_id, data)
+                if not success:
+                    continue
                     
             except Exception as e :
                 print(e)
@@ -624,16 +741,26 @@ class Task_Worker_Manager():
         logger.debug("Task_manager.dispatch start")
         task_id = str(uuid.uuid1())
         logger.debug("Task_manager.dispatch acquiring q_task_outstanding.mutex")
-        with self.q_task_outstanding.mutex:
-            logger.debug("Task_manager.dispatch has acquired q_task_outstanding.mutex")
-            if (len(self.q_task_outstanding) >= self.max_outstanding) and not ignore_size_check:
-                self.q_task_outstanding.not_full.wait()
-                
-                
-            self.q_task_outstanding._put(task_id, data)
+        try:
+            self.q_task_outstanding.mutex.acquire(timeout=2)
+        except:
+            return False
+        logger.debug("Task_manager.dispatch has acquired q_task_outstanding.mutex")
+        while (not self.stop_flag.is_set() and 
+               ((len(self.q_task_outstanding) >= self.max_outstanding) 
+                and not ignore_size_check)):
+            try:
+                self.q_task_outstanding.not_full.wait(timeout=2)
+            except:
+                continue
+        if self.stop_flag.is_set():
+            return False
             
-            self.q_task_outstanding.not_empty.notify()
             
+        self.q_task_outstanding._put(task_id, data)
+        
+        self.q_task_outstanding.not_empty.notify()
+        self.q_task_outstanding.mutex.release()
     def print_all_queues(self):
         print_all_queues(self)
     def on_task_complete(self):
@@ -642,18 +769,23 @@ class Task_Worker_Manager():
         output_minibatch = [()] * self.output_minibatch_size
         complete_count = 0
         empty_waited_count = 0
-        while True:
+        while not self.stop_flag.is_set():
             
             try:
                 logger.debug("Task_manager.on_task_complete start waiting for minibatch")
                 with self.q_task_completed.not_empty:
-                    while self.q_task_completed._qsize() < self.output_minibatch_size:
+                    while not self.stop_flag.is_set() and (self.q_task_completed._qsize() < self.output_minibatch_size):
                         
                         logger.debug("Task_manager.on_task_complete wait more record for minibatch")
-                        self.q_task_completed.not_empty.wait()
+                        try:
+                            self.q_task_completed.not_empty.wait(timeout = 2)
+                        except Exception as e:
+                            continue
                         empty_waited_count += 1
                         logger.debug(f"Task_manager.on_task_complete q size={self.q_task_completed._qsize()}")
                         logger.debug(f"Task_manager.on_task_complete empty_waited_count={empty_waited_count}")
+                    if self.stop_flag.is_set():
+                        continue
                     if self.q_task_completed._qsize() >= self.output_minibatch_size:
                         logger.debug("Task_manager.on_task_complete waited minibatch")
                         for i in range(self.output_minibatch_size):
