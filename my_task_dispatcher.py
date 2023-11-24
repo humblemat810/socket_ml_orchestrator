@@ -170,14 +170,20 @@ class My_Worker(Worker):
         
     def dispatch(self, *args, **kwargs):
         logger.debug(f"Worker{self.id}.dispatch started dispatch")
-        message = lipsync_schema_pb2.RequestData()
+        messageArray = lipsync_schema_pb2.RequestDataArray()
         #message.messageuuid=str(uuid.uuid1())
-        message.messageuuid=str(args[0][0][1])
-        self.uuid_to_time[str(args[0][0][1])] = args[0][0][0]
-        
-        message.face.extend(np.random.rand(96,96,3).flatten()) 
-        message.mel.extend(np.random.rand(80,16).flatten())
-        serialized_data = message.SerializeToString()
+        n_packet = 5
+        messageArray.messagetype = 0
+        for i in range(n_packet):
+            message = lipsync_schema_pb2.RequestData()
+            message.messageuuid=str(args[0][0][1])
+            self.uuid_to_time[str(args[0][0][1])] = args[0][0][0]
+            
+            message.face.extend(np.random.rand(96,96,3).flatten()) 
+            message.mel.extend(np.random.rand(80,16).flatten())
+            
+            messageArray.extend(message)
+        serialized_data = messageArray.SerializeToString()
         logger.debug(f"Worker{self.id}.dispatch serialised")
         # Calculate checksum
         length = len(serialized_data) 

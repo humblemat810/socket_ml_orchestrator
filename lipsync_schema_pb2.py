@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14lipsync_schema.proto\"E\n\x0bRequestData\x12\x13\n\x0bmessageuuid\x18\x01 \x01(\t\x12\x10\n\x04\x66\x61\x63\x65\x18\x02 \x03(\x02\x42\x02\x10\x01\x12\x0f\n\x03mel\x18\x03 \x03(\x02\x42\x02\x10\x01\"5\n\x0cResponseData\x12\x13\n\x0bmessageuuid\x18\x01 \x01(\t\x12\x10\n\x04\x66\x61\x63\x65\x18\x02 \x03(\x02\x42\x02\x10\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14lipsync_schema.proto\"*\n\x0fNextMessageType\x12\x17\n\x0fnextmessagetype\x18\x01 \x01(\x05\"Z\n\x0bRequestData\x12\x13\n\x0bmessagetype\x18\x01 \x01(\x05\x12\x13\n\x0bmessageuuid\x18\x02 \x01(\t\x12\x10\n\x04\x66\x61\x63\x65\x18\x03 \x03(\x02\x42\x02\x10\x01\x12\x0f\n\x03mel\x18\x04 \x03(\x02\x42\x02\x10\x01\"J\n\x0cResponseData\x12\x13\n\x0bmessagetype\x18\x01 \x01(\x05\x12\x13\n\x0bmessageuuid\x18\x02 \x01(\t\x12\x10\n\x04\x66\x61\x63\x65\x18\x03 \x03(\x02\x42\x02\x10\x01\"J\n\x10RequestDataArray\x12\x13\n\x0bmessagetype\x18\x01 \x01(\x05\x12!\n\x0bRequestData\x18\x02 \x03(\x0b\x32\x0c.RequestData\"M\n\x11ResponseDataArray\x12\x13\n\x0bmessagetype\x18\x01 \x01(\x05\x12#\n\x0cResponseData\x18\x02 \x03(\x0b\x32\r.ResponseDatab\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -27,8 +27,14 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_REQUESTDATA'].fields_by_name['mel']._serialized_options = b'\020\001'
   _globals['_RESPONSEDATA'].fields_by_name['face']._options = None
   _globals['_RESPONSEDATA'].fields_by_name['face']._serialized_options = b'\020\001'
-  _globals['_REQUESTDATA']._serialized_start=24
-  _globals['_REQUESTDATA']._serialized_end=93
-  _globals['_RESPONSEDATA']._serialized_start=95
-  _globals['_RESPONSEDATA']._serialized_end=148
+  _globals['_NEXTMESSAGETYPE']._serialized_start=24
+  _globals['_NEXTMESSAGETYPE']._serialized_end=66
+  _globals['_REQUESTDATA']._serialized_start=68
+  _globals['_REQUESTDATA']._serialized_end=158
+  _globals['_RESPONSEDATA']._serialized_start=160
+  _globals['_RESPONSEDATA']._serialized_end=234
+  _globals['_REQUESTDATAARRAY']._serialized_start=236
+  _globals['_REQUESTDATAARRAY']._serialized_end=310
+  _globals['_RESPONSEDATAARRAY']._serialized_start=312
+  _globals['_RESPONSEDATAARRAY']._serialized_end=389
 # @@protoc_insertion_point(module_scope)

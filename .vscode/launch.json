@@ -5,6 +5,23 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "my_task_dispatcher",
+            "type": "python",
+            "request": "launch",
+            "program": "my_task_dispatcher.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "pure_ml_socket_server_worker 12345",
+            "type": "python",
+            "request": "launch",
+            "program": "server_ml_echo_worker.py",
+            "console": "integratedTerminal",
+            "args": ["--port", "12345"],
+            "justMyCode": false
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",

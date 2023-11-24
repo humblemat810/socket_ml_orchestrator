@@ -1,14 +1,28 @@
 syntax = "proto3";
 
+message NextMessageType {
+  int32 nextmessagetype=1;
+}
 
 message RequestData {
-  string messageuuid = 1;
-  repeated float face = 2 [packed=true];
-  repeated float mel = 3 [packed=true];
+  int32 messagetype = 1; 
+  string messageuuid = 2;
+  repeated float face = 3 [packed=true];
+  repeated float mel = 4 [packed=true];
 }
 
 message ResponseData{
-  string messageuuid = 1;
-  repeated float face = 2 [packed=true];
+  int32 messagetype = 1; 
+  string messageuuid = 2;
+  repeated float face = 3 [packed=true];
 }
 
+message RequestDataArray{
+  int32 messagetype = 1;
+  repeated RequestData RequestData = 2;
+}
+
+message ResponseDataArray{
+  int32 messagetype = 1; 
+  repeated ResponseData ResponseData = 2;
+}
