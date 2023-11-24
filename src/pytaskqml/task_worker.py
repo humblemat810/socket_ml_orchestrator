@@ -29,7 +29,7 @@ import threading
 from queue import Queue, Empty
 import time
 import logging
-from utils.reconnecting_socket import ReconnectingSocket
+from .utils.reconnecting_socket import ReconnectingSocket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 debug = True
 class base_worker():

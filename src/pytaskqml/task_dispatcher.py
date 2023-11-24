@@ -226,7 +226,7 @@ class Worker(ABC):
                 if len(self.queue_dispatched.queue) > 0:
                     self.queue_dispatched.not_empty.notify()
                 logger.debug(f"Worker{self.id}._reduce update sort")
-                self.worker_manager.update_sort(index_in_sorter=self.index_in_sorter, change = -1)
+                self.worker_manager.update_sort(worker=self, index_in_sorter=self.index_in_sorter, change = -1)
                 logger.debug(f"Worker{self.id}._reduce update sorted")
                 self.reduce(task_info ,dispatch_result = map_result)
                 logger.debug(f"Worker{self.id}._reduce reduced")
@@ -278,7 +278,7 @@ class Worker(ABC):
             task_assignment[id] = {
                             'task_data': data, 
                             "assigned_to" : self.id} # worker id
-            self.worker_manager.update_sort(index_in_sorter=0, change = 1)
+            self.worker_manager.update_sort(worker = self, index_in_sorter=0, change = 1)
         logger.debug(f"Worker{self.id}.add_task finish")
         return True
     def add_task2 (self, *arg, priority = None):
@@ -323,7 +323,7 @@ class Worker(ABC):
                     task_assignment[id] = {
                             'task_data': data, 
                             "assigned_to" : self.id} # worker id
-                    self.worker_manager.update_sort(index_in_sorter=0, change = 1)
+                    self.worker_manager.update_sort(worker=self, index_in_sorter=0, change = 1)
                     
                     if len(self.task_manager.q_task_outstanding) > 0:
                         self.task_manager.q_task_outstanding.not_empty.notify()
@@ -430,7 +430,7 @@ class Worker_Sorter():
         task_assignment[task_id] = {
                          'task_data': data, 
                          "assigned_to" : free_worker.id} # worker id
-        self.update_sort(index_in_sorter=0, change = 1)
+        self.update_sort(worker = free_worker, index_in_sorter=0, change = 1)
         return True
     def add_task2(self, *arg, worker_id = None):
         logger.debug("Worker_sorter.add_task2 finding freest worker")
@@ -464,7 +464,7 @@ class Worker_Sorter():
                         timenow = time.time()
                         if timenow - task_info[0] > self.task_manager.task_retry_timeout:
                             worker.queue_dispatched.queue.pop(task_info)
-                            self.update_sort(index_in_sorter=worker.index_in_sorter, change = -1)
+                            self.update_sort(worker = worker, index_in_sorter=worker.index_in_sorter, change = -1)
                             """
 # issue:                         assign holds: queue_pending ,  waiting for : q_task_outstanding
                                     map holds: queue_pending        waiting for : queue_dispatched
