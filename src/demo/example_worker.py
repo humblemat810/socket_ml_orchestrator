@@ -1,6 +1,4 @@
 import logging
-
-
 import argparse
 
 # Create the argument parser
