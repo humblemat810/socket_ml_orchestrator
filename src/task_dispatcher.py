@@ -65,7 +65,8 @@ class TimerContext:
 pending should be same as dispatched if locally run single thread
 """
 import uuid
-from typing import Optional
+from heapq import _siftdown, _siftup, heappop, heappush
+from typing import Optional,Union
 task_info_template = {"task_id": str, 
                          'task_data': object, 
                          "task_type": str, 
@@ -120,6 +121,7 @@ class Worker(ABC):
         self.queue_dispatched = self.task_manager.worker_dispatched[self.id]
         self.stop_flag = Event()
         self.graceful_stopped = Event()
+        self.worker_queue: Union[Worker_Sorter.worker_list, Worker_Sorter.removinged_worker_list]= self.worker_manager.worker_list
         with self.queue_dispatched.not_full:
             self.queue_dispatched.not_full.notify()
         with self.queue_pending.not_full:
@@ -131,6 +133,11 @@ class Worker(ABC):
         
         
         # TO-DO initialize remote connection
+    def _is_deleting(self):
+        return self in self.worker_manager.removinged_worker_list and len(self) > 0
+    def _is_deleted(self):
+        return self in self.worker_manager.removinged_worker_list and len(self) == 0
+    
     def graceful_stop(self):
         self.stop_flag.set()
         self.th_map.join()
@@ -225,19 +232,8 @@ class Worker(ABC):
             logger.warning("empty still passed not_empty condition")
             
         logger.debug(f"Worker{self.id}.map queue_pending notify")
-            # task_info in format ((assignment_time, task_id), task data )
-        
 
-                # th_dispatch = Thread(target = self.dispatch, args = [data_for_dispatch],name=f'{self.id} worker dispatch')
-                # th_dispatch.start()
 
-            #self.queue_pending._popleft()
-            
-            # th_dispatch.then(self._map_result_watcher, kwargs = {'task_info': task_info}) \
-            #     .then(self._reduce, kwargs = {"task_info": task_info})
-        
-        # dispatch result inserted to _reduce_watcher
-        #self.reduce(task_info, result)
     
     def reduce (self,dispatch_result= None, task_info = None, map_result = None):
         """
@@ -276,7 +272,7 @@ class Worker(ABC):
                 self.reduce(task_info ,dispatch_result = map_result)
                 logger.debug(f"Worker{self.id}._reduce reduced")
             else:
-                print(f"late arrival, drop Task info={task_info}")
+                logger.info(f"late arrival, drop Task info={task_info}")
                 
                 "most likely task is running remotely"
                 
@@ -388,11 +384,15 @@ class Worker_Sorter():
         self.sorting_algo = sorting_algo
         self.worker_factory = worker_factory
         
+        # These two list can potentially form an abstraction of worker group
         self.worker_list :List[Worker] = [] 
+        self.removinged_worker_list :List[Worker] = [] # removing and removed worker
+        
         self.worker_by_id : Dict[int,Worker] = {}
         self.new_worker_id = 0
         self.graceful_stopped = Event()
         self.worker_list_lock = Lock()
+        self.removinged_worker_list_lock = Lock()
         # alias
         self.task_manager = task_manager
         self.task_retry_timeout = self.task_manager.task_retry_timeout
@@ -409,72 +409,39 @@ class Worker_Sorter():
             # self.worker_list_by_id[self.new_worker_id] = self.worker_list[-1]
             # self.new_worker_id += 1
         
-    def update_sort(self, index_in_sorter: int, change : int):
-        from heapq import _siftdown, _siftup
+    def update_sort(self, worker:Worker, index_in_sorter: int, change : int):
         if change > 0:
-            _siftup(self.worker_list, index_in_sorter)
+            _siftup(worker.worker_queue, index_in_sorter)
         else:
-            _siftdown(self.worker_list, index_in_sorter, len(self.worker_list)-1)
+            _siftdown(worker.worker_queue, index_in_sorter, len(self.worker_list)-1)
     def get_worker(self, id = None, index_in_sorter = None):
         # get freest worker if both id and index_in_sorter is None
         return self.worker_list[0]
     def add_worker(self, config):
+
         with self.worker_list_lock:
-            self.worker_list.append(self.worker_factory(
+            new_worker = self.worker_factory(
                 worker_manager = self,
                 id = self.new_worker_id, 
                 is_local = config['location'] == 'local', 
                 remote_info = None if config['location'] == 'local' else config['location'],
-                index_in_sorter = len(self.worker_list)
-            ))
-            self.worker_by_id[self.new_worker_id] = self.worker_list[-1]
+                index_in_sorter = len(self.worker_list),
+                worker_queue = self.worker_list
+            )
+            heappush(self.worker_list, new_worker )
+            self.worker_list.append(new_worker)
+            self.worker_by_id[self.new_worker_id] = new_worker
             self.new_worker_id += 1
-    def pop_worker(self):
-        # pop freest worker and distribute workload to other workers
-        raise NotImplementedError
-        pass
-    def _siftup(self, pos):
-        heap = self.worker_list
-        endpos = len(heap)
-        startpos = pos
-        newitem = heap[pos]
-        # Bubble up the smaller child until hitting a leaf.
-        childpos = 2*pos + 1    # leftmost child position
-        while childpos < endpos:
-            # Set childpos to index of smaller child.
-            rightpos = childpos + 1
-            if rightpos < endpos and not heap[childpos] < heap[rightpos]:
-                childpos = rightpos
-            # Move the smaller child up.
-            index_in_sorter = heap[pos].index_in_sorter
-            heap[pos] = heap[childpos]
-            heap[pos].index_in_sorter = index_in_sorter
-            pos = childpos
-            childpos = 2*pos + 1
-        # The leaf at pos is empty now.  Put newitem there, and bubble it up
-        # to its final resting place (by sifting its parents down).
-        index_in_sorter = heap[pos].index_in_sorter
-        heap[pos] = newitem
-        heap[pos].index_in_sorter = index_in_sorter
-        self._siftdown(heap, startpos, pos)
-    def _siftdown(self, startpos, pos):
-        heap = self.worker_list
-        newitem = heap[pos]
-        # Follow the path to the root, moving parents down until finding a place
-        # newitem fits.
-        while pos > startpos:
-            parentpos = (pos - 1) >> 1
-            parent = heap[parentpos]
-            if newitem < parent:
-                index_in_sorter = heap[pos].index_in_sorter
-                heap[pos] = parent
-                heap[pos].index_in_sorter = index_in_sorter
-                pos = parentpos
-                continue
-            break
-        index_in_sorter = heap[pos].index_in_sorter
-        heap[pos] = newitem
-        heap[pos].index_in_sorter = index_in_sorter
+    def pop_worker(self, worker):
+
+        with self.worker_list_lock:
+            if worker in self.worker_list_lock:
+                assert worker is heappop(self.worker_list, worker.index_in_sorter)
+                # make sure the reference removed is itself
+            else:
+                with self.removinged_worker_list_lock:
+                    heappush(self.removinged_worker_list, worker)
+                    worker.worker_queue = self.removinged_worker_list
     def get_task(self, task_id):
         # brutforce search task through each worker, not recommended
         # for high performance
@@ -525,7 +492,8 @@ class Worker_Sorter():
             
     def check_workers_timeout_retry(self):
         while not self.stop_flag.is_set():
-            for worker in self.worker_by_id.values():
+            for worker in self.worker_by_id.values(): 
+                # such that removing workers will also get checked, and if time out, will dispatch to the non removing outstanding queue
                 if self.stop_flag.is_set():
                     continue
                 with worker.queue_dispatched.not_empty:
@@ -688,7 +656,9 @@ class Task_Worker_Manager():
         th = Thread(target = self.on_task_complete, args = [], name='task work manager task complete')
         th.start()
         self.th_clean_up = th
-        
+    def send_output(self,fresh_output_minibatch):
+        # to be overwrrtten to achieve actual task to output the data such as disk or network
+        print(f"len fresh output = {len(fresh_output_minibatch)}")
 
     def assign_task(self):
         """
@@ -762,6 +732,7 @@ class Task_Worker_Manager():
         self.q_task_outstanding.not_empty.notify()
         self.q_task_outstanding.mutex.release()
     def print_all_queues(self):
+        from utils import print_all_queues
         print_all_queues(self)
     def on_task_complete(self):
         #function that operate on task completed
@@ -809,9 +780,8 @@ class Task_Worker_Manager():
                                 output_minibatch[cnt_fresh] = completed
                                 cnt_fresh += 1
                                 logger.debug(f'fresh cnt {cnt_fresh}')
-                        def send_output(fresh_output_minibatch):
-                            print(f"len fresh output = {len(fresh_output_minibatch)}")
-                        send_output(output_minibatch[:cnt_fresh])
+                        
+                        self.send_output(output_minibatch[:cnt_fresh])
                         logger.debug(f'fresh cnt {cnt_fresh} sent')
                         output_minibatch = [()] * self.output_minibatch_size
                             
@@ -822,43 +792,3 @@ class Task_Worker_Manager():
             except Exception as e:
                 print(e)
                 pass
-
-from pprint import pprint
-def print_all_queues(my_task_worker_manager: Task_Worker_Manager = None):
-    
-    print("Task_Worker_Manager:")
-    print("  q_task_outstanding", len(my_task_worker_manager.q_task_outstanding))
-    print("  q_task_completed", my_task_worker_manager.q_task_completed._qsize())
-    print("Worker_Sorter:")
-    print("workers:", my_task_worker_manager._worker_sorter.worker_by_id)
-    print("workers task:", [len(worker) for id, worker in my_task_worker_manager._worker_sorter.worker_by_id.items()])
-    print("workers heap:", [len(worker) for worker in my_task_worker_manager._worker_sorter.worker_list])
-    for w in my_task_worker_manager._worker_sorter.worker_list:
-        pprint(w)
-        pprint(w.queue_pending.queue)
-        print("pending_task_limit", w.pending_task_limit)
-        print("pending_task", len(w.queue_pending.queue))
-        
-        print("dispatched_task_limit", w.dispatched_task_limit)
-        print("dispatched_task", len(w.queue_dispatched.queue))
-        pprint(w.queue_dispatched.queue)
-if __name__ == '__main__':
-    my_task_worker_manager = Task_Worker_Manager()
-    #my_task_worker_manager.start()
-    import numpy as np
-    task_data = enumerate([np.array(range(20)).reshape([4,5])])
-    cnt = 0
-    while True:
-        try:
-            if debug:
-                print("task_dispatcher.__main__")
-            frame_data = {"frame_number": cnt, "face": np.random.rand(96,96,3), 'mel': np.random.rand(80,16)}
-            my_task_worker_manager.dispatch(frame_data)
-            print_all_queues(my_task_worker_manager)
-        except Exception as e:
-            print(e)
-            raise
-            
-        #time.sleep(0.1)
-
-

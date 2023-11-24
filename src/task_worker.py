@@ -5,7 +5,6 @@ port = os.environ['port']
 process_id = os.getpid()
 # Create a logger
 
-# logger.setLevel(logging.DEBUG)
 
 # # Create a console handler and set its format
 # console_handler = logging.StreamHandler()
@@ -33,7 +32,7 @@ from queue import Queue, Empty, Full
 import select
 import time
 import logging
-from reconnecting_socket import ReconnectingSocket
+from utils.reconnecting_socket import ReconnectingSocket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 debug = True
 class base_worker():
@@ -185,7 +184,7 @@ class base_socket_worker(base_worker):
         print(f"client {client.id} exited handle_workload while loop")
         client.handle_wkld_exiting.set()
     def graceful_stop(self, *args):
-        
+        self.logger.info('graceful stopping')
         #stop_ths = [threading.Thread(target=i.stop_client, args = []) for i in self.client_dict.values()]
         stop_ths = list(map(lambda x : threading.Thread(target=x.stop_client), self.client_dict.values()))
         list(map(lambda x : x.start() ,stop_ths))
@@ -322,6 +321,7 @@ class base_socket_worker(base_worker):
                     def do_GET(self):
                         if self.path == '/shutdown':
                             mytaskworker.stop_flag.set()
+                            mytaskworker.logger.info(f"workser {mytaskworker.id} received graceful shutdown signal")
                             mytaskworker.graceful_stop()
                             
                             threading.Thread(target=httpd.shutdown, daemon=True).start()

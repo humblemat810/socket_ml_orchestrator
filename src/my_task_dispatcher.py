@@ -6,7 +6,6 @@ logger.setLevel(logging.DEBUG)
 
 # Create a console handler and set its format
 console_handler = logging.StreamHandler()
-#formatter = logging.Formatter("%(levelname)s - %(message)s")
 formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s",
 
                               )
@@ -24,8 +23,8 @@ logger.addHandler(fh)
 from task_dispatcher import Worker, Worker_Sorter, Task_Worker_Manager
 from task_dispatcher import print_all_queues # debug tools
 from pprint import pprint
-import socket, select
-from reconnecting_socket import ReconnectingSocket
+import socket
+from utils.reconnecting_socket import ReconnectingSocket
 import time
 from threading import Thread, Event
 import hashlib
@@ -33,13 +32,7 @@ import lipsync_schema_pb2, uuid
 import numpy as np
 import queue
 debug = False
-def is_socket_connected(sock):
-    # Check if the socket is connected
-    try:
-        sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
-        return True
-    except socket.error:
-        return False
+
 class My_Worker(Worker):
     def init_socket(self):
         pass
@@ -67,6 +60,9 @@ class My_Worker(Worker):
         self.watermark = time.time()
         self.output_minibatch_size = 24
     def graceful_stop(self):
+        # how to graceful stop if user has created something that need special care to take down
+        # this example turns off reconnecting to let the socket thread able to shut down on disconnect
+        # instead of forever trying to reconnect and can never graceful stop
         super().graceful_stop()
         if self.is_local:
             pass
@@ -74,7 +70,8 @@ class My_Worker(Worker):
             self.client_socket.retry_enabled = False
         
     def result_buffer_collect(self):
-        
+        # this function is require to implement what to do when receive data from variable
+        # self.client_socket
         
         client_socket = self.client_socket
         client_socket.sock.settimeout(2)
@@ -83,11 +80,6 @@ class My_Worker(Worker):
         cnt = 0
         while not self.stop_flag.is_set():
             try:
-                # readable, _, _ = select.select([self.client_socket.sock], [], [])
-                # for readable_socket isn readable:
-                #     # sleep to wait for data coming in to save the thread
-
-                #     pass
                 try:
                     data = client_socket.recv(115757000)
                 except socket.timeout as te:
@@ -142,9 +134,11 @@ class My_Worker(Worker):
                 client_socket.close()
                 return
             
-    def reduce(self, *arg, **kwarg):
-        #merge data to face 
-        pass
+    def reduce(self, task_info ,dispatch_result): 
+
+        # override this function if you want to do something before reducing to the main queue after collect from worker
+        # dispatch_result : same as map_result you pass to self._reduce
+        return None
     def _map_result_watcher(self):
         while not self.stop_flag.is_set():
             logger.debug('start listen map result')
@@ -166,9 +160,14 @@ class My_Worker(Worker):
             
         
     def prepare_for_dispatch(self,task_info,  *args, **kwargs):
+        # this function allows developer to do something to prepare data
+        # before sending to worker
         return task_info
         
     def dispatch(self, *args, **kwargs):
+        # this has to be implemented to tell what exactly to do to dispatch data to worker
+        # such as what protocol e.g. protobuf, to use to communicate with worker and also #
+        # transfer data or ref to data
         logger.debug(f"Worker{self.id}.dispatch started dispatch")
         messageArray = lipsync_schema_pb2.RequestDataArray()
         #message.messageuuid=str(uuid.uuid1())
@@ -208,7 +207,6 @@ class My_Worker(Worker):
         self.last_run = cur_time
         
         pass
-import select      
 if __name__ == '__main__':
     worker_config = [#{"location": "local"},
                      {"location": ('localhost', 12345)}, 
@@ -227,15 +225,13 @@ if __name__ == '__main__':
 
     logger.debug('signal start')
     def dispatch_from_main():
+        # this function demonstrate main dispatch data such as video frame data or ref to video frame for example
         cnt = 0
         while not my_task_worker_manager.stop_flag.is_set():
             cnt+=1
             frame_data = {'data_ref','k'+str(cnt)}#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}
             my_task_worker_manager.dispatch(frame_data)
-            
-            #print_all_queues(my_task_worker_manager)
             time.sleep(0.02)
-            
             logger.debug(f'__main__ : cnt {cnt} added')
 
     th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
