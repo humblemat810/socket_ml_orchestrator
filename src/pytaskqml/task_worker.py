@@ -25,14 +25,11 @@ import socket
 import hashlib
 import numpy as np
 import time
-import lipsync_schema_pb2
 import threading
-import uuid
-from queue import Queue, Empty, Full
-import select
+from queue import Queue, Empty
 import time
 import logging
-from utils.reconnecting_socket import ReconnectingSocket
+from .utils.reconnecting_socket import ReconnectingSocket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 debug = True
 class base_worker():

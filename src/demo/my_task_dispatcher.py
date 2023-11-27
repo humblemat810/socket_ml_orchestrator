@@ -20,9 +20,7 @@ logger.addHandler(fh)
 
 
 
-from task_dispatcher import Worker, Worker_Sorter, Task_Worker_Manager
-from task_dispatcher import print_all_queues # debug tools
-from pprint import pprint
+from task_dispatcher import Worker, Task_Worker_Manager
 import socket
 from utils.reconnecting_socket import ReconnectingSocket
 import time

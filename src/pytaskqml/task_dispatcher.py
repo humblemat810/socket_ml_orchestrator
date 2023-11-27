@@ -20,18 +20,16 @@ logger.debug('start loading module task_dispatcher.py')
 transaction_mode = False
 import socket
 import  queue
-import OrderedDictQueue
+from .utils.OrderedDictQueue import OrderedDictQueue, dictQueue
 from threading import Thread, Lock, Event
 import time
-import inspect
 from typing import List, Dict
-import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from contextlib import contextmanager
+
 debug = True
 stop_event = Event()
-ODictQueue: OrderedDictQueue.OrderedDictQueue = OrderedDictQueue.OrderedDictQueue  # optimized for change in order, pop first often
-dictQueue:OrderedDictQueue.dictQueue = OrderedDictQueue.dictQueue        #optimised for key pop
+ODictQueue: OrderedDictQueue = OrderedDictQueue  # optimized for change in order, pop first often
+
 
 # TO-DO
 """
@@ -47,18 +45,6 @@ dictQueue:OrderedDictQueue.dictQueue = OrderedDictQueue.dictQueue        #optimi
 from abc import ABC, abstractmethod
 import time
 
-class TimerContext:
-    def __init__(self, label):
-        self.label = label
-
-    def __enter__(self):
-        if debug:
-            self.start_time = time.time()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if debug:
-            elapsed_time = time.time() - self.start_time
-            print(f"{self.label} took {elapsed_time:.6f} seconds.")
 
 
 """
@@ -72,34 +58,7 @@ task_info_template = {"task_id": str,
                          "task_type": str, 
                          "assigned_to" : Optional[str]} # worker id
 task_assignment = ODictQueue()
-# class ThreadWithReturnValue(Thread):
-#     def __init__(self, group=None, target=None, name=None,
-#                  args=(), kwargs={}, Verbose=None):
-#         Thread.__init__(self, group, target, name, args, kwargs, Verbose)
-#         self._return = None
-#     def run(self):
-#         if self._Thread__target is not None:
-#             self._return = self._Thread__target(*self._Thread__args,
-#                                                 **self._Thread__kwargs)
-#     def join(self):
-#         Thread.join(self)
-#         return self._return
-def require_either_method(methods):
-    def decorator(cls):
-        if all(map(hasattr, [cls] * len(methods),  methods)):
-            raise NotImplementedError(f"Subclasses must implement 1 method in {methods}")
-        return cls
-    return decorator
-Require_Reduce_or_Watcher_cls_decorator = require_either_method(["_reduce", 'reduce_watcher'])
-def require_either_method(methods):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            if all(map(hasattr, [args[0]] * len(methods),  methods)):
-                raise NotImplementedError(f"Class must implement either at least 1 function in {methods}")
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-#@Require_Reduce_or_Watcher_cls_decorator()
+
 
 
 class Worker(ABC):
@@ -267,7 +226,7 @@ class Worker(ABC):
                 if len(self.queue_dispatched.queue) > 0:
                     self.queue_dispatched.not_empty.notify()
                 logger.debug(f"Worker{self.id}._reduce update sort")
-                self.worker_manager.update_sort(index_in_sorter=self.index_in_sorter, change = -1)
+                self.worker_manager.update_sort(worker=self, index_in_sorter=self.index_in_sorter, change = -1)
                 logger.debug(f"Worker{self.id}._reduce update sorted")
                 self.reduce(task_info ,dispatch_result = map_result)
                 logger.debug(f"Worker{self.id}._reduce reduced")
@@ -319,7 +278,7 @@ class Worker(ABC):
             task_assignment[id] = {
                             'task_data': data, 
                             "assigned_to" : self.id} # worker id
-            self.worker_manager.update_sort(index_in_sorter=0, change = 1)
+            self.worker_manager.update_sort(worker = self, index_in_sorter=0, change = 1)
         logger.debug(f"Worker{self.id}.add_task finish")
         return True
     def add_task2 (self, *arg, priority = None):
@@ -364,7 +323,7 @@ class Worker(ABC):
                     task_assignment[id] = {
                             'task_data': data, 
                             "assigned_to" : self.id} # worker id
-                    self.worker_manager.update_sort(index_in_sorter=0, change = 1)
+                    self.worker_manager.update_sort(worker=self, index_in_sorter=0, change = 1)
                     
                     if len(self.task_manager.q_task_outstanding) > 0:
                         self.task_manager.q_task_outstanding.not_empty.notify()
@@ -471,7 +430,7 @@ class Worker_Sorter():
         task_assignment[task_id] = {
                          'task_data': data, 
                          "assigned_to" : free_worker.id} # worker id
-        self.update_sort(index_in_sorter=0, change = 1)
+        self.update_sort(worker = free_worker, index_in_sorter=0, change = 1)
         return True
     def add_task2(self, *arg, worker_id = None):
         logger.debug("Worker_sorter.add_task2 finding freest worker")
@@ -505,7 +464,7 @@ class Worker_Sorter():
                         timenow = time.time()
                         if timenow - task_info[0] > self.task_manager.task_retry_timeout:
                             worker.queue_dispatched.queue.pop(task_info)
-                            self.update_sort(index_in_sorter=worker.index_in_sorter, change = -1)
+                            self.update_sort(worker = worker, index_in_sorter=worker.index_in_sorter, change = -1)
                             """
 # issue:                         assign holds: queue_pending ,  waiting for : q_task_outstanding
                                     map holds: queue_pending        waiting for : queue_dispatched
@@ -670,11 +629,10 @@ class Task_Worker_Manager():
             try:
                 with self.q_task_outstanding.not_empty:
                     while (len(self.q_task_outstanding) <= 0) and not self.stop_flag.is_set():
-                #        with TimerContext("Task Work Man Asgn "):
-                            try:
-                                self.q_task_outstanding.not_empty.wait(timeout = 2)
-                            except Exception as e:
-                                continue
+                        try:
+                            self.q_task_outstanding.not_empty.wait(timeout = 2)
+                        except Exception as e:
+                            continue
                     if self.stop_flag.is_set():
                         continue
                     packed = self.q_task_outstanding._popleft()
@@ -732,7 +690,6 @@ class Task_Worker_Manager():
         self.q_task_outstanding.not_empty.notify()
         self.q_task_outstanding.mutex.release()
     def print_all_queues(self):
-        from utils import print_all_queues
         print_all_queues(self)
     def on_task_complete(self):
         #function that operate on task completed
@@ -792,3 +749,22 @@ class Task_Worker_Manager():
             except Exception as e:
                 print(e)
                 pass
+from pprint import pprint
+def print_all_queues(my_task_worker_manager: Task_Worker_Manager = None):
+    
+    print("Task_Worker_Manager:")
+    print("  q_task_outstanding", len(my_task_worker_manager.q_task_outstanding))
+    print("  q_task_completed", my_task_worker_manager.q_task_completed._qsize())
+    print("Worker_Sorter:")
+    print("workers:", my_task_worker_manager._worker_sorter.worker_by_id)
+    print("workers task:", [len(worker) for id, worker in my_task_worker_manager._worker_sorter.worker_by_id.items()])
+    print("workers heap:", [len(worker) for worker in my_task_worker_manager._worker_sorter.worker_list])
+    for w in my_task_worker_manager._worker_sorter.worker_list:
+        pprint(w)
+        pprint(w.queue_pending.queue)
+        print("pending_task_limit", w.pending_task_limit)
+        print("pending_task", len(w.queue_pending.queue))
+        
+        print("dispatched_task_limit", w.dispatched_task_limit)
+        print("dispatched_task", len(w.queue_dispatched.queue))
+        pprint(w.queue_dispatched.queue)

@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='pyPromise',
+    name='pysockettaskqml',
     version='1.0.0',
-    description='A simple Python project',
-    author='Your Name',
-    author_email='your@email.com',
-    packages=find_packages(),
+    description='python implemented task queue framework for websocket based machine learning streaming application',
+    author='Peter Chan',
+    author_email='humblemat@gmail.com',
+    package_dir={'': 'src'},
+    packages=['.'],
     install_requires=[
-        'dependency1',
-        'dependency2'
+      "protobuf"
     ],
 )
