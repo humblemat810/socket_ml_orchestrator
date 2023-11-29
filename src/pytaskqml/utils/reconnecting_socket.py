@@ -43,7 +43,7 @@ class ReconnectingSocket:
                 self.sock.sendall(data)
                 #print("Data sent successfully\n").then
                 break  # Exit the loop if send is successful
-            except socket.error:
+            except socket.error as se:
                 print("Socket send failed. Reconnecting...")
                 #self.connect()
                 with self.reconnecting_lock:
@@ -55,7 +55,7 @@ class ReconnectingSocket:
                 data = self.sock.recv(buffer_size)
                 #print("Data received successfully\n")
                 return data  # Exit the loop and return received data
-            except socket.error:
+            except socket.error as se:
                 print("Socket receive failed. Reconnecting...")
                 with self.reconnecting_lock:
                     self.reconnecting_needed.set()

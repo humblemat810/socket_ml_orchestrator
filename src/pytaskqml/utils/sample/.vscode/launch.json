@@ -1,0 +1,34 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${fileDirname}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: demodispatcher",
+            "type": "python",
+            "request": "launch",
+            "program": "demo_case1_dispatcher.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: demo worker",
+            "type": "python",
+            "request": "launch",
+            "program": "demo_case1_wordcount_worker.py",
+            "console": "integratedTerminal",
+            "args" : ["--port", "12345"],
+            "justMyCode": true
+        }
+    ]
+}

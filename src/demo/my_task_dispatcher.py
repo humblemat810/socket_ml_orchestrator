@@ -20,9 +20,9 @@ logger.addHandler(fh)
 
 
 
-from task_dispatcher import Worker, Task_Worker_Manager
+from pytaskqml.task_dispatcher import Worker, Task_Worker_Manager
 import socket
-from utils.reconnecting_socket import ReconnectingSocket
+from pytaskqml.utils.reconnecting_socket import ReconnectingSocket
 import time
 from threading import Thread, Event
 import hashlib
