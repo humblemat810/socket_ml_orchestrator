@@ -11,11 +11,12 @@ class ReconnectingSocket:
         self.sock = None
         self.reconnecting_needed = threading.Event()
         self.reconnecting_lock = threading.Lock()
+        self.retry_enabled = True
         self.th_reconnecting_watchdog = threading.Thread(target = self.reconnecting_watchdog)
         self.th_reconnecting_watchdog.start()
         self.last_reconnect_time = time.time()
         self.reconnect_interval = 2
-        self.retry_enabled = True
+        
     def reconnecting_watchdog(self):
         while self.retry_enabled:
             self.reconnecting_needed.wait()

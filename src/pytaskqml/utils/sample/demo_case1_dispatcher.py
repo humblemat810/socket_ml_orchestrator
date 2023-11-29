@@ -66,7 +66,7 @@ if __name__ == '__main__':
                 output_minibatch_size = 24,
                 management_port = management_port,
                 logger = logger,
-                retry_watcher_on = False
+                retry_watcher_on = True
             )
     
     th = threading.Thread(target = my_task_worker_manager.start, args = [])
@@ -87,7 +87,7 @@ if __name__ == '__main__':
                 return random.choice(words)
             frame_data = generate_random_word()#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}
             my_task_worker_manager.dispatch(frame_data)
-            time.sleep(0.02)
+            #time.sleep(0.01)
             logger.debug(f'__main__ : cnt {cnt} added')
 
     th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')

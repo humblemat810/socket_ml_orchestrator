@@ -497,8 +497,8 @@ class Worker_Sorter():
                             break # to next worker
                         
             
-            time.sleep(max(self.task_retry_timeout, 0.1))            
-
+            time.sleep(max(self.task_retry_timeout, 0.2))
+        self.logger.info('retry watch loop escaped')
         
     def start(self):
         with self.worker_list_lock:
@@ -516,10 +516,13 @@ class Worker_Sorter():
         
         for id, worker in self.worker_by_id.items():
             threading.Thread(target = worker.graceful_stop).start()
+            self.logger.info(f'worker {id} started stopping')
         for id, worker in self.worker_by_id.items():
             worker.graceful_stopped.wait()
+            self.logger.info(f'worker {id} gracefully stopped')
         if self.retry_watcher_on:
             self.th_retry_watch.join()
+            self.logger.info(f'retry watch stopped')
         self.graceful_stopped.set()
         
 class Task_Worker_Manager():
@@ -593,10 +596,10 @@ class Task_Worker_Manager():
                 if self.path == '/shutdown':
                     mytaskworker.stop_flag.set()
                     mytaskworker.graceful_stop()
-                    
-                    
                     self._send_response(200, "Shutdown requested\n")
-                    threading.Thread(target=httpd.shutdown, daemon=True).start()
+                    time.sleep(1)
+                    mytaskworker.logger.info('shutting down gracefully')
+                    threading.Thread(target=httpd.shutdown).start()
                 else:
                     self._send_response(404, "Not found\n")
 
