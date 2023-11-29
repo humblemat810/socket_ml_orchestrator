@@ -3,12 +3,12 @@ import subprocess
 
 def run_file1():
     # Define the arguments for the first Python file
-    args_file1 = ["python", r"demo_case1_wordcount_worker.py", "--port", "12345", "--management-port", "22345"]
+    args_file1 = ["python", r"demo_case1_wordcount_worker.py", "--port", "12345", "--management-port", "22345", "--config", 'worker.ini']
     subprocess.call(args_file1)
 
 def run_file2():
     # Define the arguments for the second Python file
-    args_file2 = ["python", r"demo_case1_dispatcher.py", "--management-port", "18000"]
+    args_file2 = ["python", r"demo_case1_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher.ini']
     subprocess.call(args_file2)
 import os
 
@@ -36,10 +36,11 @@ if __name__ == "__main__":
         process1.start()
         process2.start()
         import time
-        time.sleep(3)
+        time.sleep(5)
         import requests
-        requests.get('http://localhost:22345/shutdown')
-        requests.get('http://localhost:18000/shutdown')
+        from threading import Thread
+        Thread(target = requests.get, args = ['http://localhost:22345/shutdown']).start() # worker
+        Thread(target = requests.get, args = ['http://localhost:18000/shutdown']).start()
         # Wait for both processes to finish
         process1.join()
         process2.join()

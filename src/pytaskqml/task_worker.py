@@ -314,38 +314,38 @@ class base_socket_worker(base_worker):
                     time.sleep(1)
             th_debug = Thread(target =debug_fun, name = 'debug_fun')
             th_debug.start()
+        if is_server:
+            mytaskworker = self
+            class MyHandler(BaseHTTPRequestHandler):
+                def _send_response(self, status_code, message):
+                    self.send_response(status_code)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(message.encode('utf-8'))
+
+                def do_GET(self):
+                    if self.path == '/shutdown':
+                        mytaskworker.stop_flag.set()
+                        mytaskworker.logger.info(f"worker pid {process_id} port {port} received graceful shutdown signal")
+                        mytaskworker.graceful_stop()
+                        
+                        self._send_response(200, "Shutdown requested\n")
+                        threading.Thread(target=httpd.shutdown, daemon=True).start()
+                        
+                    else:
+                        self._send_response(404, "Not found\n")
+
+            
+            server_address = ('', self.management_port)
+            httpd = HTTPServer(server_address, MyHandler)
+            self.httpd = httpd
+            def start_server():
+                
+                httpd.serve_forever()
+            self.th_httpd = threading.Thread(target = start_server)
+            self.th_httpd.start()
         while not self.stop_flag.is_set():
             if is_server:
-                
-                mytaskworker = self
-                class MyHandler(BaseHTTPRequestHandler):
-                    def _send_response(self, status_code, message):
-                        self.send_response(status_code)
-                        self.send_header('Content-type', 'text/plain')
-                        self.end_headers()
-                        self.wfile.write(message.encode('utf-8'))
-
-                    def do_GET(self):
-                        if self.path == '/shutdown':
-                            mytaskworker.stop_flag.set()
-                            mytaskworker.logger.info(f"worker pid {process_id} port {port} received graceful shutdown signal")
-                            mytaskworker.graceful_stop()
-                            
-                            self._send_response(200, "Shutdown requested\n")
-                            threading.Thread(target=httpd.shutdown, daemon=True).start()
-                            
-                        else:
-                            self._send_response(404, "Not found\n")
-
-                
-                server_address = ('', self.management_port)
-                httpd = HTTPServer(server_address, MyHandler)
-                self.httpd = httpd
-                def start_server():
-                    
-                    httpd.serve_forever()
-                self.th_httpd = threading.Thread(target = start_server)
-                self.th_httpd.start()
                 try:
                     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 

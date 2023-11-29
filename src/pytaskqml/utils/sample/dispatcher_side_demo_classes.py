@@ -7,6 +7,21 @@ from pytaskqml.task_dispatcher import Socket_Producer_Side_Worker, Task_Worker_M
 import time
 from threading import Thread
 
+class my_word_count_dispatcher(Task_Worker_Manager):
+    def __init__(self, *arg, **kwarg):
+        super().__init__(*arg, **kwarg)
+        from collections import Counter
+        self.count_dict = Counter()
+        
+
+    def send_output(self, fresh_output_minibatch):
+        for task_info, counter in fresh_output_minibatch:
+            self.count_dict += counter
+            for k in counter.keys():
+                print(k,self.count_dict.get(k))
+        pass
+    pass
+
 class my_word_count_socket_producer_side_worker(Socket_Producer_Side_Worker):
     
     def _parse_task_info(self, single_buffer_result):
