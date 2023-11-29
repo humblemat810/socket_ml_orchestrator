@@ -1,7 +1,7 @@
 import socket
 import time
 
-from threading import Event, Condition, Lock, Thread
+import  threading
 
 class ReconnectingSocket:
     def __init__(self, host_port):
@@ -9,9 +9,9 @@ class ReconnectingSocket:
         self.host = host
         self.port = port
         self.sock = None
-        self.reconnecting_needed = Event()
-        self.reconnecting_lock = Lock()
-        self.th_reconnecting_watchdog = Thread(target = self.reconnecting_watchdog)
+        self.reconnecting_needed = threading.Event()
+        self.reconnecting_lock = threading.Lock()
+        self.th_reconnecting_watchdog = threading.Thread(target = self.reconnecting_watchdog)
         self.th_reconnecting_watchdog.start()
         self.last_reconnect_time = time.time()
         self.reconnect_interval = 2

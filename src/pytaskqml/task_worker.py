@@ -308,11 +308,11 @@ class base_socket_worker(base_worker):
         if debug:
             # spawn a debug thread for debugger insertion
             # to debug case when all 3 rec, send, process are sleeping
-            from threading import Thread
+            
             def debug_fun():
                 while not self.stop_flag.is_set():
                     time.sleep(1)
-            th_debug = Thread(target =debug_fun, name = 'debug_fun')
+            th_debug = threading.Thread(target =debug_fun, name = 'debug_fun')
             th_debug.start()
         if is_server:
             mytaskworker = self

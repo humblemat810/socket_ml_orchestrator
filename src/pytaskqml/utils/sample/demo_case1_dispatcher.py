@@ -53,7 +53,7 @@ logger.addHandler(fh)
 import pytaskqml.task_dispatcher as task_dispatcher
 task_dispatcher.modulelogger = logger
 from dispatcher_side_demo_classes import my_word_count_socket_producer_side_worker, my_word_count_dispatcher
-from threading import Thread
+import threading
 import time
 if __name__ == '__main__':
     worker_config = [#{"location": "local"},
@@ -69,7 +69,7 @@ if __name__ == '__main__':
                 retry_watcher_on = False
             )
     
-    th = Thread(target = my_task_worker_manager.start, args = [])
+    th = threading.Thread(target = my_task_worker_manager.start, args = [])
     th.start()
 
     # this demo shows how to write own loop to dispatch data
@@ -90,7 +90,7 @@ if __name__ == '__main__':
             time.sleep(0.02)
             logger.debug(f'__main__ : cnt {cnt} added')
 
-    th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
+    th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
     while not my_task_worker_manager.stop_flag.is_set():
         time.sleep(0.4)

@@ -38,9 +38,9 @@ def main():
         import time
         time.sleep(5)
         import requests
-        from threading import Thread
-        Thread(target = requests.get, args = ['http://localhost:22345/shutdown']).start() # worker
-        Thread(target = requests.get, args = ['http://localhost:18000/shutdown']).start()
+        import threading
+        threading.Thread(target = requests.get, args = ['http://localhost:22345/shutdown']).start() # worker
+        threading.Thread(target = requests.get, args = ['http://localhost:18000/shutdown']).start()
         # Wait for both processes to finish
         process1.join()
         process2.join()

@@ -20,13 +20,13 @@ modulelogger = logging.getLogger()
 import socket
 import  queue
 from .utils.OrderedDictQueue import OrderedDictQueue, dictQueue
-from threading import Thread, Lock, Event
+import threading
 import time
 from typing import List, Dict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 debug = True
-stop_event = Event()
+stop_event = threading.Event()
 ODictQueue: OrderedDictQueue = OrderedDictQueue  # optimized for change in order, pop first often
 
 
@@ -77,20 +77,20 @@ class Worker(ABC):
         self.worker_manager = worker_manager
         self.task_manager = self.worker_manager.task_manager
         self.logger = self.worker_manager.task_manager.logger
-        self.lock = Lock()
+        self.lock = threading.Lock()
         self.index_in_sorter = index_in_sorter
         self.pending_task_limit = pending_task_limit# min(pending_task_limit, self.task_manager.output_minibatch_size)
         self.dispatched_task_limit = 12 # must be greater than or equal to minibatch limit
         self.id = id
-        self.th_map: Thread
+        self.th_map: threading.Thread
         if min_start_processing_length is None:
             min_start_processing_length = 4096
         self.min_start_processing_length = min_start_processing_length
-        self.th_map_result_watch: Thread
+        self.th_map_result_watch: threading.Thread
         self.queue_pending = self.task_manager.worker_pending[self.id]
         self.queue_dispatched = self.task_manager.worker_dispatched[self.id]
-        self.stop_flag = Event()
-        self.graceful_stopped = Event()
+        self.stop_flag = threading.Event()
+        self.graceful_stopped = threading.Event()
         self.worker_queue: Union[Worker_Sorter.worker_list, Worker_Sorter.removinged_worker_list]= self.worker_manager.worker_list
         with self.queue_dispatched.not_full:
             self.queue_dispatched.not_full.notify()
@@ -132,7 +132,7 @@ class Worker(ABC):
                     raise
                 
 
-        th_map = Thread(target = to_th_map, args = [], name=f'{self.id} worker map')
+        th_map = threading.Thread(target = to_th_map, args = [], name=f'{self.id} worker map')
         th_map.start()
         self.th_map = th_map
         def to_th_reduce():
@@ -142,7 +142,7 @@ class Worker(ABC):
                 except Exception as e:
                     print(e)
                     raise
-        th_map_result_watch = Thread(target = to_th_reduce, args = [],name=f'{self.id} worker watcher')
+        th_map_result_watch = threading.Thread(target = to_th_reduce, args = [],name=f'{self.id} worker watcher')
         th_map_result_watch.start()
         self.th_map_result_watch = th_map_result_watch
     @abstractmethod
@@ -208,7 +208,7 @@ class Worker(ABC):
                 self.queue_dispatched.not_empty.notify()
                 self.logger.debug(f"Worker{self.id}.map dispatched_task_limit notified")
         else:
-            logger.warning("empty still passed not_empty condition")
+            self.logger.warning("empty still passed not_empty condition")
             
         self.logger.debug(f"Worker{self.id}.map queue_pending notify")
 
@@ -251,7 +251,7 @@ class Worker(ABC):
                 self.reduce(task_info ,dispatch_result = map_result)
                 self.logger.debug(f"Worker{self.id}._reduce reduced")
             else:
-                logger.info(f"late arrival, drop Task info={task_info}")
+                self.logger.info(f"late arrival, drop Task info={task_info}")
                 
                 "most likely task is running remotely"
                 
@@ -332,7 +332,7 @@ class Worker(ABC):
                 self.logger.debug(f"Worker{self.id}.add_task2 is waiting for queue_pending.not_empty")
                 packed = self.task_manager.q_task_outstanding._first()
                 if packed is None:
-                    logger.warning("empty but still has not_empty, work number tracker has error")
+                    self.logger.warning("empty but still has not_empty, work number tracker has error")
                     
                 else:
                     task_id, data = packed
@@ -369,9 +369,9 @@ class Worker_Sorter():
         
         self.worker_by_id : Dict[int,Worker] = {}
         self.new_worker_id = 0
-        self.graceful_stopped = Event()
-        self.worker_list_lock = Lock()
-        self.removinged_worker_list_lock = Lock()
+        self.graceful_stopped = threading.Event()
+        self.worker_list_lock = threading.Lock()
+        self.removinged_worker_list_lock = threading.Lock()
         # alias
         
         self.task_manager = task_manager
@@ -379,7 +379,7 @@ class Worker_Sorter():
         self.task_retry_timeout = self.task_manager.task_retry_timeout
         self.retry_watcher_on = self.task_manager.retry_watcher_on
         self.q_task_completed = self.task_manager.q_task_completed
-        self.stop_flag = Event()
+        self.stop_flag = threading.Event()
         for config in task_manager.worker_config:
             self.add_worker(config)
 
@@ -507,7 +507,7 @@ class Worker_Sorter():
         if self.task_retry_timeout == float('inf') or self.task_retry_timeout == 0:
             pass
         else:
-            th_retry_watch = Thread(target= self.check_workers_timeout_retry, name = 'worker timeout watcher')
+            th_retry_watch = threading.Thread(target= self.check_workers_timeout_retry, name = 'worker timeout watcher')
             if self.retry_watcher_on:
                 th_retry_watch.start()
             self.th_retry_watch = th_retry_watch
@@ -515,7 +515,7 @@ class Worker_Sorter():
         self.stop_flag.set()
         
         for id, worker in self.worker_by_id.items():
-            Thread(target = worker.graceful_stop).start()
+            threading.Thread(target = worker.graceful_stop).start()
         for id, worker in self.worker_by_id.items():
             worker.graceful_stopped.wait()
         if self.retry_watcher_on:
@@ -562,7 +562,7 @@ class Task_Worker_Manager():
         self.th_assign = None
         self.th_clean_up = None
         self.stop = False
-        self.stop_flag = Event()
+        self.stop_flag = threading.Event()
         self.watermark = time.time()
         self.water_mark_lookback = 60
         self.watermark_check = False
@@ -570,7 +570,7 @@ class Task_Worker_Manager():
         self.worker_factory = self._worker_sorter.worker_factory
         self.init_locks()
         self.management_port = management_port
-        self.graceful_stopped = Event()
+        self.graceful_stopped = threading.Event()
         #self.init_manager(port=self.manager_port)
         self.set_manage_httpd()
     def graceful_stop(self):
@@ -596,7 +596,7 @@ class Task_Worker_Manager():
                     
                     
                     self._send_response(200, "Shutdown requested\n")
-                    Thread(target=httpd.shutdown, daemon=True).start()
+                    threading.Thread(target=httpd.shutdown, daemon=True).start()
                 else:
                     self._send_response(404, "Not found\n")
 
@@ -607,7 +607,7 @@ class Task_Worker_Manager():
         def start_server():
             
             httpd.serve_forever()
-        self.th_httpd = Thread(target = start_server)
+        self.th_httpd = threading.Thread(target = start_server)
         self.th_httpd.start()
 
         
@@ -625,12 +625,12 @@ class Task_Worker_Manager():
                 dq.not_full.notify()
 
     def start(self):
-        th = Thread(target = self.assign_task, args = [], name='task work manager assign task')
+        th = threading.Thread(target = self.assign_task, args = [], name='task work manager assign task')
         th.start()
         self.th_assign = th
         self._worker_sorter.start()
         
-        th = Thread(target = self.on_task_complete, args = [], name='task work manager task complete')
+        th = threading.Thread(target = self.on_task_complete, args = [], name='task work manager task complete')
         th.start()
         self.th_clean_up = th
     def send_output(self,fresh_output_minibatch):
@@ -655,7 +655,7 @@ class Task_Worker_Manager():
                         continue
                     packed = self.q_task_outstanding._popleft()
                     if packed is None:
-                        logger.warning("pop should not happen when empty, tracker has error")
+                        self.logger.warning("pop should not happen when empty, tracker has error")
                         continue
                     if len(self.q_task_outstanding) > 0:
                         self.q_task_outstanding.not_empty.notify()
@@ -697,7 +697,7 @@ class Task_Worker_Manager():
                 and not ignore_size_check)):
             try:
                 self.q_task_outstanding.not_full.wait(timeout=2)
-            except error as e:
+            except Exception as e:
                 continue
         if self.stop_flag.is_set():
             self.q_task_outstanding.mutex.release()
@@ -803,7 +803,7 @@ class Socket_Producer_Side_Worker(Worker):
         self.last_run = time.time() - self.min_time_lapse_ns/ 1e9
         self.is_local = is_local
         self.auto_call_reduce = False
-        self.stop_flag = Event()
+        self.stop_flag = threading.Event()
         self.socket_last_run = None
         if is_local:
             self.client_socket = None
@@ -811,7 +811,7 @@ class Socket_Producer_Side_Worker(Worker):
             self.server_address = remote_info # eg example : ('localhost', 5000)
             self.client_socket = ReconnectingSocket(self.server_address)
             self.client_socket.connect()
-            th = Thread(target = self.result_buffer_collect, args = [], name = f'result buffer collect {self.id}')
+            th = threading.Thread(target = self.result_buffer_collect, args = [], name = f'result buffer collect {self.id}')
             self.socket_start_time = time.time()
             th.start()
         self.map_result_buffer = queue.Queue()

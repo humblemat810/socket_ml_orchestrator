@@ -24,7 +24,7 @@ from pytaskqml.task_dispatcher import Worker, Task_Worker_Manager
 import socket
 from pytaskqml.utils.reconnecting_socket import ReconnectingSocket
 import time
-from threading import Thread, Event
+import threading
 import hashlib
 import lipsync_schema_pb2, uuid
 import numpy as np
@@ -51,7 +51,7 @@ class My_Worker(Worker):
             self.server_address = remote_info # eg example : ('localhost', 5000)
             self.client_socket = ReconnectingSocket(self.server_address)
             self.client_socket.connect()
-            th = Thread(target = self.result_buffer_collect, args = [], name = f'result buffer collect {self.id}')
+            th = threading.Thread(target = self.result_buffer_collect, args = [], name = f'result buffer collect {self.id}')
             self.socket_start_time = time.time()
             th.start()
         self.map_result_buffer = queue.Queue()
@@ -216,7 +216,7 @@ if __name__ == '__main__':
                                                  output_minibatch_size = 24
                                                  )
     
-    th = Thread(target = my_task_worker_manager.start, args = [])
+    th = threading.Thread(target = my_task_worker_manager.start, args = [])
     th.start()
 
     
@@ -232,7 +232,7 @@ if __name__ == '__main__':
             time.sleep(0.02)
             logger.debug(f'__main__ : cnt {cnt} added')
 
-    th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
+    th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
     while not my_task_worker_manager.stop_flag.is_set():
         time.sleep(0.4)

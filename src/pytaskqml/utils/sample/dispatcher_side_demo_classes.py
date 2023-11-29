@@ -5,7 +5,7 @@ logger = logging.getLogger()
 
 from pytaskqml.task_dispatcher import Socket_Producer_Side_Worker, Task_Worker_Manager
 import time
-from threading import Thread
+import threading
 
 class my_word_count_dispatcher(Task_Worker_Manager):
     def __init__(self, *arg, **kwarg):
@@ -63,7 +63,7 @@ if __name__ == '__main__':
                 management_port = 8000
             )
     
-    th = Thread(target = my_task_worker_manager.start, args = [])
+    th = threading.Thread(target = my_task_worker_manager.start, args = [])
     th.start()
 
     # this demo shows how to write own loop to dispatch data
@@ -79,7 +79,7 @@ if __name__ == '__main__':
             time.sleep(0.02)
             logger.debug(f'__main__ : cnt {cnt} added')
 
-    th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
+    th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
     while not my_task_worker_manager.stop_flag.is_set():
         time.sleep(0.4)
