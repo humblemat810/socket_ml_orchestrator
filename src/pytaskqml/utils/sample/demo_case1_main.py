@@ -23,7 +23,7 @@ class ChangeDirectory:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         os.chdir(self.previous_directory)
-if __name__ == "__main__":
+def main():
     import os, pathlib
     with ChangeDirectory(str(pathlib.Path(__file__).parent)):
         
@@ -45,3 +45,6 @@ if __name__ == "__main__":
         process1.join()
         process2.join()
     print('done')
+if __name__ == "__main__":
+    main()
+    
