@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
     name='pysockettaskqml',
@@ -9,6 +9,16 @@ setup(
     package_dir={'': 'src'},
     packages=['.'],
     install_requires=[
-      "protobuf"
     ],
+    extras_require={
+        'optional': [
+            'protobuf',
+            'scipy',
+        ],
+        'dev': [
+            'pytest'
+        ]
+
+    }
+    
 )

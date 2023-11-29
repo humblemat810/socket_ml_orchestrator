@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message MyMessage {
+  string messageuuid = 1;
+  string strmessage = 2;
+}

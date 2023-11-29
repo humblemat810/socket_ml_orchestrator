@@ -76,7 +76,10 @@ class myclient():
 from typing import Dict
 class base_socket_worker(base_worker):
     def __init__(self, server_address = ('localhost', 5000),
-                 min_time_lapse_ns = 10000, *arg, **kwarg):
+                 min_time_lapse_ns = 10000,
+                 management_port=18464,
+                 min_start_processing_length = None,
+                 *arg, **kwarg):
         self.logger = logging.getLogger(f"server_ml_echo_worker-{port}")
         self.server_address = server_address
         self.min_time_lapse_ns = min_time_lapse_ns
@@ -85,6 +88,8 @@ class base_socket_worker(base_worker):
         #self.send_queue = Queue()
         self.client_dict: Dict[int, myclient] = {}
         self.graceful_stop_done = threading.Event()
+        self.management_port = management_port
+        self.min_start_processing_length = min_start_processing_length # 115757000
         import signal
         signal.signal(signal.SIGINT, self.graceful_stop)
         #self.received_parsed_queue = Queue()
@@ -204,14 +209,17 @@ class base_socket_worker(base_worker):
                 #     pass
                 self.logger.debug(f"client {client.id} handle_receive socket receive waiting")
                 try:
-                    data = client.client_socket.recv(115757000)
+                    if self.min_start_processing_length:
+                        data = client.client_socket.recv(self.min_start_processing_length)
+                    else:
+                        data = client.client_socket.recv(4096)
                 except socket.timeout:
                     continue
                 data_with_checksum = data_with_checksum + data
                 self.logger.debug(f"client {client.id} handle_receive socket received len{len(data_with_checksum)}")
                 client.last_received = time.time()
                 #print(f"receive non cond: {len(data_with_checksum)}")
-                while not client.stop_event.is_set() and len(data_with_checksum) >= 115757:
+                while not client.stop_event.is_set() and len(data_with_checksum) >= max(42, self.min_start_processing_length):
                     
                     #print(f"receive cond: {len(data_with_checksum)}")
                     self.logger.debug(f"client {client.id} handle_receive checking data integrity")
@@ -219,6 +227,8 @@ class base_socket_worker(base_worker):
                     
                     checksum = data_with_checksum[:32].decode()
                     length = data_with_checksum[32:42]
+                    if len(data_with_checksum) < int(length) + 42:
+                        break # wait for more data to come
                     hash_algo.update(length)
                     length = int(data_with_checksum[32:42].decode())
                     received_data = data_with_checksum[42:42+length]
@@ -304,37 +314,38 @@ class base_socket_worker(base_worker):
                     time.sleep(1)
             th_debug = Thread(target =debug_fun, name = 'debug_fun')
             th_debug.start()
+        if is_server:
+            mytaskworker = self
+            class MyHandler(BaseHTTPRequestHandler):
+                def _send_response(self, status_code, message):
+                    self.send_response(status_code)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(message.encode('utf-8'))
+
+                def do_GET(self):
+                    if self.path == '/shutdown':
+                        mytaskworker.stop_flag.set()
+                        mytaskworker.logger.info(f"worker pid {process_id} port {port} received graceful shutdown signal")
+                        mytaskworker.graceful_stop()
+                        
+                        self._send_response(200, "Shutdown requested\n")
+                        threading.Thread(target=httpd.shutdown, daemon=True).start()
+                        
+                    else:
+                        self._send_response(404, "Not found\n")
+
+            
+            server_address = ('', self.management_port)
+            httpd = HTTPServer(server_address, MyHandler)
+            self.httpd = httpd
+            def start_server():
+                
+                httpd.serve_forever()
+            self.th_httpd = threading.Thread(target = start_server)
+            self.th_httpd.start()
         while not self.stop_flag.is_set():
             if is_server:
-                
-                mytaskworker = self
-                class MyHandler(BaseHTTPRequestHandler):
-                    def _send_response(self, status_code, message):
-                        self.send_response(status_code)
-                        self.send_header('Content-type', 'text/plain')
-                        self.end_headers()
-                        self.wfile.write(message.encode('utf-8'))
-
-                    def do_GET(self):
-                        if self.path == '/shutdown':
-                            mytaskworker.stop_flag.set()
-                            mytaskworker.logger.info(f"workser {mytaskworker.id} received graceful shutdown signal")
-                            mytaskworker.graceful_stop()
-                            
-                            threading.Thread(target=httpd.shutdown, daemon=True).start()
-                            self._send_response(200, "Shutdown requested\n")
-                        else:
-                            self._send_response(404, "Not found\n")
-
-                
-                server_address = ('', 18464)
-                httpd = HTTPServer(server_address, MyHandler)
-                self.httpd = httpd
-                def start_server():
-                    
-                    httpd.serve_forever()
-                self.th_httpd = threading.Thread(target = start_server)
-                self.th_httpd.start()
                 try:
                     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
