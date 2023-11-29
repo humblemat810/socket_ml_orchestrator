@@ -130,7 +130,7 @@ class Worker(ABC):
                 except Exception as e:
                     print(e)
                     raise
-                
+            self.logger.info(f'worker {self.id} th_map loop finish')
 
         th_map = threading.Thread(target = to_th_map, args = [], name=f'{self.id} worker map')
         th_map.start()
@@ -142,6 +142,7 @@ class Worker(ABC):
                 except Exception as e:
                     print(e)
                     raise
+            self.logger.info(f'worker {self.id} th_map_result_watch loop finish')
         th_map_result_watch = threading.Thread(target = to_th_reduce, args = [],name=f'{self.id} worker watcher')
         th_map_result_watch.start()
         self.th_map_result_watch = th_map_result_watch
@@ -504,6 +505,7 @@ class Worker_Sorter():
         with self.worker_list_lock:
             for id, w in self.worker_by_id.items():
                 w.start()
+                self.logger.info(f"worker {w.id} started")
         if self.task_retry_timeout == float('inf') or self.task_retry_timeout == 0:
             pass
         else:
@@ -511,6 +513,7 @@ class Worker_Sorter():
             if self.retry_watcher_on:
                 th_retry_watch.start()
             self.th_retry_watch = th_retry_watch
+        self.logger.info(f"{self} started")
     def graceful_stop(self):
         self.stop_flag.set()
         

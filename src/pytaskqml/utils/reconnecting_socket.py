@@ -19,12 +19,25 @@ class ReconnectingSocket:
         
     def reconnecting_watchdog(self):
         while self.retry_enabled:
-            self.reconnecting_needed.wait()
-            with self.reconnecting_lock:
-                if time.time() - self.last_reconnect_time < self.reconnect_interval:
-                    self.connect()
-                    self.last_reconnect_time = time.time()
-                    self.reconnecting_needed.clear()
+            try:
+                self.reconnecting_needed.wait(timeout = 2)
+            except RuntimeError:
+                continue
+            except Exception as e:
+                print(e)
+                pass
+            try:    
+                self.reconnecting_lock.acquire(timeout = 2)
+            except RuntimeError:
+                continue
+            except Exception as e:
+                print(e)
+                pass
+            if time.time() - self.last_reconnect_time < self.reconnect_interval:
+                self.connect()
+                self.last_reconnect_time = time.time()
+                self.reconnecting_needed.clear()
+            self.reconnecting_lock.release()
     def connect(self):
         while self.retry_enabled:
             try:
