@@ -29,6 +29,18 @@ if type(log_screen) is str:
         log_screen = True
     else:
         raise ValueError(f"incorrect config for log_screen, expected UNION[FALSE, TRUE], get {log_screen}")
+worker_config = []
+i = 1
+while f'worker.{i}' in config:
+    worker_section = config[f'worker.{i}']
+    location = worker_section['location']
+    location, port = location.split(':')
+    worker_config.append({"location": (str(location),int(port)),
+                          "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
+                          })
+    i+=1
+
+
 import logging
 
 # Create a logger
@@ -56,10 +68,10 @@ from dispatcher_side_demo_classes import my_word_count_socket_producer_side_work
 import threading
 import time
 if __name__ == '__main__':
-    worker_config = [#{"location": "local"},
-                     {"location": ('localhost', 12345), 
-                      "min_start_processing_length" : 42}, 
-                    ]
+    # worker_config = [#{"location": "local"},
+    #                  {"location": ('localhost', 12345), 
+    #                   "min_start_processing_length" : 42}, 
+    #                 ]
     my_task_worker_manager = my_word_count_dispatcher(
                 worker_factory=my_word_count_socket_producer_side_worker, 
                 worker_config = worker_config,

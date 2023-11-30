@@ -259,8 +259,8 @@ class Worker(ABC):
                 "task not exist, maybe reduced by other worker, or this is a retry but the original task"
                 "completed when retry task is pending, i.e. original may race with current, when retry function implemented"
                 pass
-        with self.task_manager.q_task_completed.not_full:
-            self.logger.debug(f"Worker{self.id}._reduce acquired q_task_completed.not_full condition")
+        with self.task_manager.q_task_completed.mutex:
+            self.logger.debug(f"Worker{self.id}._reduce acquired q_task_completed mutex")
             self.logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
             while (not self.stop_flag.is_set() 
                    and self.task_manager.q_task_completed._qsize() >= self.task_manager.q_task_completed_limit):
@@ -283,7 +283,7 @@ class Worker(ABC):
         if priority is None:
             priority = time.time()
         self.logger.debug(f"Worker{self.id}.add_task acquiring queue_pending.mutex")
-        with self.queue_pending.not_full:
+        with self.queue_pending.mutex:
             self.logger.debug(f"Worker{self.id}.add_task acquired queue_pending.mutex")
             while (len(self.queue_pending) >= self.pending_task_limit) and not self.stop_flag.is_set():
                 self.logger.debug(f"Worker{self.id}.add_task acquired queue_pending.mutex")
@@ -306,10 +306,10 @@ class Worker(ABC):
         if priority is None:
             priority = time.time()
         self.logger.debug(f"Worker{self.id}.add_task2 acquiring queue_pending.mutex")
-        with self.queue_pending.not_full:
+        with self.queue_pending.mutex:
             self.logger.debug(f"Worker{self.id}.add_task2 has acquried queue_pending.mutex")
             while (not self.stop_flag.is_set() and 
-                   (self.queue_pending._qsize() > self.queue_pending.maxsize)):
+                   (self.queue_pending._qsize() >= self.queue_pending.maxsize)):
                 self.logger.debug(f"Worker{self.id}.add_task2 is waiting for queue_pending.not_full")
                 try:
                     self.queue_pending.not_full.wait(timeout = 2)

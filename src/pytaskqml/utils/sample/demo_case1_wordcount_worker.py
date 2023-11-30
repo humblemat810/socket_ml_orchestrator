@@ -18,20 +18,22 @@ config = configparser.ConfigParser()
 if args.config:    
     config.read(args.config)
 
-management_port = config.get("worker", "management-port")
+management_port = args.management_port
 if management_port is None:
-    management_port = args.management_port
+    management_port = config.get("worker", "management-port")
 management_port = int(management_port)
-port = config.get("worker", "port")
+
+port = args.port 
 if port is None:
-    port = args.port 
+    port = config.get("worker", "port")    
 port = int(port)
-log_level = config.get("logger", "level")
+log_level = args.log_level
 if log_level is None:
-    log_level = args.log_level
-log_screen = config.get("logger", "logscreen")
+    log_level = config.get("logger", "level")
+log_screen = args.log_screen
 if log_screen is None:
-    log_screen = args.log_screen
+    log_screen = config.get("logger", "logscreen")
+    
 if type(log_screen) is str:
     if log_screen.upper() == 'FALSE':
         log_screen = False
