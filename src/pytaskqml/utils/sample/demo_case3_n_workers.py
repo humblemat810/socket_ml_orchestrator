@@ -2,23 +2,18 @@ import multiprocessing
 import subprocess
 
 import pathlib
-def run_worker1():
+def run_worker(i_worker = 0):
     # Define the arguments for the first Python file
-    args_file1 = ["python",'-m','yappi','-c', 'wall', '-f', 'ystat', 
+    args_file1 = ["python",'yappi_main_wrapper.py', 
                   #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
-                  r"demo_case1_wordcount_worker.py", "--port", "12345", "--management-port", "22345", "--config", 'worker.ini']
+                  r"demo_case1_wordcount_worker.main", f"worker{12345+i_worker}", "--port", str(12345 + i_worker), "--management-port", str(22345+0), "--config", 'worker.ini']
     subprocess.call(args_file1)
-def run_worker2():
-    # Define the arguments for the first Python file
-    args_file1 = ["python",'-m','yappi','-c', 'wall', '-f', 'ystat',
-                  #'-o', str((pathlib.Path(".")/'worker12346.ystat').resolve()),  
-                  r"demo_case1_wordcount_worker.py", "--port", "12346", "--management-port", "22346", "--config", 'worker2.ini']
-    subprocess.call(args_file1)
-def run_dispatcher():
+
+def run_dispatcher(n_worker):
     # Define the arguments for the second Python file
-    args_file2 = ["python",'-m','yappi','-c', 'wall', '-f', 'ystat',
+    args_file2 = ["python",'yappi_main_wrapper.py', 
                   #'-o', str((pathlib.Path(".")/'dispatcher.ystat').resolve()), 
-                  r"demo_case1_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher_case2.ini']
+                  r"demo_case1_dispatcher.main", 'dispatcher',"--management-port", "18000", "--config", 'dispatcher_case2.ini', '--n-worker', f"{n_worker}"]
     subprocess.call(args_file2)
 
 import os
@@ -34,52 +29,52 @@ class ChangeDirectory:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         os.chdir(self.previous_directory)
-def main():
+def main(n_worker = 1):
     import os, pathlib
     with ChangeDirectory(str(pathlib.Path(__file__).parent)):
         
 
-        # Create two separate processes for running the files
-        process1 = multiprocessing.Process(target=run_worker1)
-        process2 = multiprocessing.Process(target=run_worker2)
-        process3 = multiprocessing.Process(target=run_dispatcher)    
+        processes = []
+
+        for i in range(n_worker):
+            processes.append(multiprocessing.Process(target = run_worker, args = [i]))
+        processes.append(multiprocessing.Process(target=run_dispatcher, args = [n_worker]))
         
         # Start both processes
-        process1.start()
-        process2.start()
-        process3.start()
+        for p in processes:
+            p.start()
+        
         import time
-        time.sleep(12)
+        time.sleep(3)
         import requests
         import threading
         def shutdown_server():
             while True:
                 try:
-                    requests.get('http://localhost:18000/shutdown', timeout = 5)
+                    requests.get('http://localhost:18000/shutdown')
                 except:
                     continue
                 return
-        def shutdown_worker1():
+        def shutdown_worker(i_worker):
             while True:
                 try:
-                    requests.get('http://localhost:22345/shutdown', timeout = 5)
+                    requests.get(f'http://localhost:{22345+i_worker}/shutdown')
                 except:
                     continue
                 return
-        def shutdown_worker2():
-            while True:
-                try:
-                    requests.get('http://localhost:22346/shutdown', timeout = 5)
-                except:
-                    continue
-                return
+        
         threading.Thread(target = shutdown_server).start() # worker
-        threading.Thread(target = shutdown_worker1).start()
-        threading.Thread(target = shutdown_worker2).start()
+        from typing import List
+        shutdown_ths: List[threading.Thread] = []
+        for i in range(n_worker):
+            shutdown_ths.append(threading.Thread(target = shutdown_worker, args = [i], name = f'shutdown worker {i}'))
+        shutdown_ths.append(threading.Thread(target = shutdown_server, name = 'shutdown server'))
+        for th in shutdown_ths:
+            th.start()
+        for th in shutdown_ths:
+            th.join()
         # Wait for both processes to finish
-        process1.join()
-        process2.join()
-        process3.join()
+
     print('done')
 if __name__ == "__main__":
     import yappi

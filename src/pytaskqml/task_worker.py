@@ -1,7 +1,7 @@
 import logging
 import traceback
 import os
-port = os.environ['port']
+port = os.environ.get('port')
 process_id = os.getpid()
 # Create a logger
 
@@ -90,8 +90,8 @@ class base_socket_worker(base_worker):
         self.graceful_stop_done = threading.Event()
         self.management_port = management_port
         self.min_start_processing_length = min_start_processing_length # 115757000
-        import signal
-        signal.signal(signal.SIGINT, self.graceful_stop)
+        #import signal
+        #signal.signal(signal.SIGINT, self.graceful_stop)
         #self.received_parsed_queue = Queue()
 
         
@@ -188,7 +188,7 @@ class base_socket_worker(base_worker):
     def graceful_stop(self, *args):
         self.logger.info('graceful stopping')
         #stop_ths = [threading.Thread(target=i.stop_client, args = []) for i in self.client_dict.values()]
-        stop_ths = list(map(lambda x : threading.Thread(target=x.stop_client), self.client_dict.values()))
+        stop_ths = list(map(lambda x : threading.Thread(target=x.stop_client, name = f'graceful shutdown {x.id}'), self.client_dict.values()))
         list(map(lambda x : x.start() ,stop_ths))
         list(map(lambda x : x.join() ,stop_ths))
         self.graceful_stop_done.set()
@@ -252,35 +252,35 @@ class base_socket_worker(base_worker):
                     else:
                         logging.info("receive cond Checksum mismatch. Data corrupted.")
                         client.close()
-                        return
+                        break
             except ConnectionResetError as e:
                 # TO-DO graceful stop
                 self.logger.debug(traceback.format_exc())
                 client.client_socket.close()
                 client.stop_event.set()
-                return
+                break
             except UnicodeDecodeError as e:
                 self.logger.debug(traceback.format_exc())
                 client.client_socket.close()
                 client.stop_event.set()
-                return
+                break
             except OSError as e:
                 self.logger.debug(traceback.format_exc())
                 client.client_socket.close()
                 client.stop_event.set()
-                return
+                break
             except ConnectionAbortedError as e:
                 self.logger.debug(traceback.format_exc())
                 client.send_queue._put(Stop_Signal)
                 client.stop_event.set()
                 client.close()
-                return
+                break
             except Exception as e:
                 self.logger.debug(traceback.format_exc())
                 traceback.print_exc(e)
                 client.stop_event.set()
                 client.client_socket.close()
-                return
+                break
         print(f"client {client.id} exited handle_receive while loop")
         client.handle_recv_exiting.set()
     
@@ -330,8 +330,16 @@ class base_socket_worker(base_worker):
                         mytaskworker.graceful_stop()
                         
                         self._send_response(200, "Shutdown requested\n")
-                        threading.Thread(target=httpd.shutdown, daemon=True).start()
-                        
+                        def my_http_shutdown():
+                            try:
+                                httpd.shutdown()
+                            except Exception as e:
+                                print(e)
+                                raise
+
+                        th_stop = threading.Thread(target=my_http_shutdown)
+                        th_stop.start()
+                        th_stop.join()
                     else:
                         self._send_response(404, "Not found\n")
 
@@ -342,7 +350,7 @@ class base_socket_worker(base_worker):
             def start_server():
                 
                 httpd.serve_forever()
-            self.th_httpd = threading.Thread(target = start_server)
+            self.th_httpd = threading.Thread(target = start_server, name = f'worker-{server_address}.httpd')
             self.th_httpd.start()
         while not self.stop_flag.is_set():
             if is_server:
@@ -392,9 +400,7 @@ class base_socket_worker(base_worker):
             
             
                 client_socket.close()
-        import sys
-        self.graceful_stop_done.wait()
-        sys.exit(0)
+
                 
                 
 

@@ -63,7 +63,7 @@ if __name__ == '__main__':
                 management_port = 8000
             )
     
-    th = threading.Thread(target = my_task_worker_manager.start, args = [])
+    th = threading.Thread(target = my_task_worker_manager.start, args = [], name = 'dispatcher side demo classes, main')
     th.start()
 
     # this demo shows how to write own loop to dispatch data

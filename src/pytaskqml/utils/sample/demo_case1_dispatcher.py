@@ -5,6 +5,7 @@ parser.add_argument('--management-port', type=str, help='Management Port number'
 parser.add_argument('--log-level', dest="log_level", help='Configuration file path')
 parser.add_argument('--config', help='Configuration file path')
 parser.add_argument('--log-screen', action='store_const', const=True, default=False, help='Enable log to screen', dest="log_screen")
+parser.add_argument('--n-worker', help='num of workers', dest= "n_worker", type= int)
 args = parser.parse_args()
 
 import configparser
@@ -39,7 +40,18 @@ while f'worker.{i}' in config:
                           "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
                           })
     i+=1
-
+    if args.n_worker is not None:
+        if i <= args.n_worker:
+            continue
+        else:
+            break
+if args.n_worker is not None:
+    while i < args.n_worker:
+        port = str(int(port) + 1)
+        worker_config.append({"location": (str(location),int(port)),
+                          "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
+                          })
+        i+=1
 
 import logging
 
@@ -67,11 +79,13 @@ task_dispatcher.modulelogger = logger
 from dispatcher_side_demo_classes import my_word_count_socket_producer_side_worker, my_word_count_dispatcher
 import threading
 import time
-if __name__ == '__main__':
+def main():
     # worker_config = [#{"location": "local"},
     #                  {"location": ('localhost', 12345), 
     #                   "min_start_processing_length" : 42}, 
     #                 ]
+    import sys
+    print(sys.modules[__name__])
     my_task_worker_manager = my_word_count_dispatcher(
                 worker_factory=my_word_count_socket_producer_side_worker, 
                 worker_config = worker_config,
@@ -112,3 +126,5 @@ if __name__ == '__main__':
         except:
             continue
         break
+if __name__ == '__main__':
+    main()
