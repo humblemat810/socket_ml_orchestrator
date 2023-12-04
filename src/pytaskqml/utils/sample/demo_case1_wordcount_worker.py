@@ -9,6 +9,7 @@ parser.add_argument('--port', type=int, help='Port number', dest = 'port', defau
 parser.add_argument('--management-port', type=str, help='Management Port number', dest = 'management_port', default = "8001")
 parser.add_argument('--log-level', dest="log_level")
 parser.add_argument('--config', help='Configuration file path')
+
 parser.add_argument('--log-screen', action='store_const', const=True, default=False, help='Enable log to screen', dest="log_screen")
 
 # Parse the command-line arguments
@@ -18,20 +19,22 @@ config = configparser.ConfigParser()
 if args.config:    
     config.read(args.config)
 
-management_port = config.get("worker", "management-port")
+management_port = args.management_port
 if management_port is None:
-    management_port = args.management_port
+    management_port = config.get("worker", "management-port")
 management_port = int(management_port)
-port = config.get("worker", "port")
+
+port = args.port 
 if port is None:
-    port = args.port 
+    port = config.get("worker", "port")    
 port = int(port)
-log_level = config.get("logger", "level")
+log_level = args.log_level
 if log_level is None:
-    log_level = args.log_level
-log_screen = config.get("logger", "logscreen")
+    log_level = config.get("logger", "level")
+log_screen = args.log_screen
 if log_screen is None:
-    log_screen = args.log_screen
+    log_screen = config.get("logger", "logscreen")
+    
 if type(log_screen) is str:
     if log_screen.upper() == 'FALSE':
         log_screen = False
@@ -63,10 +66,15 @@ logger.debug('start loading module')
 
 
 from worker_demo_classes import word_count_worker
-
-if __name__ == "__main__":
-    
+def main():
+    import sys
+    print(sys.modules[__name__])
     my_ML_socket_server = word_count_worker(server_address = ('localhost', int(port) ),
                                             management_port=management_port, min_start_processing_length = 42)
     my_ML_socket_server.start()
+    my_ML_socket_server.graceful_stop_done.wait()
+    print(f'worker{port} stopped')
+if __name__ == "__main__":
+    main()
+    
 

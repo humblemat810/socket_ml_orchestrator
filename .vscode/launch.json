@@ -22,9 +22,19 @@
             "justMyCode": false
         },
         {
+            "name": "Python: Current File redirect stdout",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${fileDirname}",
+            "program": "${file}",
+            "console": "externalTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
+            "cwd": "${fileDirname}",
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false

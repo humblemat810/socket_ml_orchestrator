@@ -5,6 +5,7 @@ parser.add_argument('--management-port', type=str, help='Management Port number'
 parser.add_argument('--log-level', dest="log_level", help='Configuration file path')
 parser.add_argument('--config', help='Configuration file path')
 parser.add_argument('--log-screen', action='store_const', const=True, default=False, help='Enable log to screen', dest="log_screen")
+parser.add_argument('--n-worker', help='num of workers', dest= "n_worker", type= int)
 args = parser.parse_args()
 
 import configparser
@@ -29,6 +30,29 @@ if type(log_screen) is str:
         log_screen = True
     else:
         raise ValueError(f"incorrect config for log_screen, expected UNION[FALSE, TRUE], get {log_screen}")
+worker_config = []
+i = 1
+while f'worker.{i}' in config:
+    worker_section = config[f'worker.{i}']
+    location = worker_section['location']
+    location, port = location.split(':')
+    worker_config.append({"location": (str(location),int(port)),
+                          "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
+                          })
+    i+=1
+    if args.n_worker is not None:
+        if i <= args.n_worker:
+            continue
+        else:
+            break
+if args.n_worker is not None:
+    while i <= args.n_worker:
+        port = str(int(port) + 1)
+        worker_config.append({"location": (str(location),int(port)),
+                          "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
+                          })
+        i+=1
+
 import logging
 
 # Create a logger
@@ -53,23 +77,25 @@ logger.addHandler(fh)
 import pytaskqml.task_dispatcher as task_dispatcher
 task_dispatcher.modulelogger = logger
 from dispatcher_side_demo_classes import my_word_count_socket_producer_side_worker, my_word_count_dispatcher
-from threading import Thread
+import threading
 import time
-if __name__ == '__main__':
-    worker_config = [#{"location": "local"},
-                     {"location": ('localhost', 12345), 
-                      "min_start_processing_length" : 42}, 
-                    ]
+def main():
+    # worker_config = [#{"location": "local"},
+    #                  {"location": ('localhost', 12345), 
+    #                   "min_start_processing_length" : 42}, 
+    #                 ]
+    import sys
+    print(sys.modules[__name__])
     my_task_worker_manager = my_word_count_dispatcher(
                 worker_factory=my_word_count_socket_producer_side_worker, 
                 worker_config = worker_config,
                 output_minibatch_size = 24,
                 management_port = management_port,
                 logger = logger,
-                retry_watcher_on = False
+                retry_watcher_on = True
             )
     
-    th = Thread(target = my_task_worker_manager.start, args = [])
+    th = threading.Thread(target = my_task_worker_manager.start, args = [])
     th.start()
 
     # this demo shows how to write own loop to dispatch data
@@ -87,10 +113,10 @@ if __name__ == '__main__':
                 return random.choice(words)
             frame_data = generate_random_word()#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}
             my_task_worker_manager.dispatch(frame_data)
-            time.sleep(0.02)
+            #time.sleep(0.01)
             logger.debug(f'__main__ : cnt {cnt} added')
 
-    th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
+    th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
     while not my_task_worker_manager.stop_flag.is_set():
         time.sleep(0.4)
@@ -100,3 +126,5 @@ if __name__ == '__main__':
         except:
             continue
         break
+if __name__ == '__main__':
+    main()

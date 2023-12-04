@@ -5,20 +5,23 @@ logger = logging.getLogger()
 
 from pytaskqml.task_dispatcher import Socket_Producer_Side_Worker, Task_Worker_Manager
 import time
-from threading import Thread
+import threading
 
 class my_word_count_dispatcher(Task_Worker_Manager):
     def __init__(self, *arg, **kwarg):
         super().__init__(*arg, **kwarg)
         from collections import Counter
         self.count_dict = Counter()
-        
+    def on_shutdown(self):
+        for k,v in self.count_dict.items():
+            print(k,v)
+        return super().on_shutdown()
 
     def send_output(self, fresh_output_minibatch):
         for task_info, counter in fresh_output_minibatch:
             self.count_dict += counter
-            for k in counter.keys():
-                print(k,self.count_dict.get(k))
+            # for k in counter.keys():
+            #     print(k,self.count_dict.get(k))
         pass
     pass
 
@@ -63,7 +66,7 @@ if __name__ == '__main__':
                 management_port = 8000
             )
     
-    th = Thread(target = my_task_worker_manager.start, args = [])
+    th = threading.Thread(target = my_task_worker_manager.start, args = [], name = 'dispatcher side demo classes, main')
     th.start()
 
     # this demo shows how to write own loop to dispatch data
@@ -79,7 +82,7 @@ if __name__ == '__main__':
             time.sleep(0.02)
             logger.debug(f'__main__ : cnt {cnt} added')
 
-    th = Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
+    th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
     while not my_task_worker_manager.stop_flag.is_set():
         time.sleep(0.4)

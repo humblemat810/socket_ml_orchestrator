@@ -1,14 +1,16 @@
 import multiprocessing
 import subprocess
-
+import pathlib
 def run_file1():
     # Define the arguments for the first Python file
-    args_file1 = ["python", r"demo_case1_wordcount_worker.py", "--port", "12345", "--management-port", "22345", "--config", 'worker.ini']
+    args_file1 = ["python",'-m','cProfile', '-o', str((pathlib.Path(".")/'worker12345.prof').resolve()), 
+                  r"demo_case1_wordcount_worker.py", "--port", "12345", "--management-port", "22345", "--config", 'worker.ini']
     subprocess.call(args_file1)
 
 def run_file2():
     # Define the arguments for the second Python file
-    args_file2 = ["python", r"demo_case1_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher.ini']
+    args_file2 = ["python",'-m','cProfile', '-o', str((pathlib.Path(".")/'dispatcher.prof').resolve()), 
+                  r"demo_case1_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher.ini']
     subprocess.call(args_file2)
 import os
 
@@ -36,7 +38,7 @@ def main():
         process1.start()
         process2.start()
         import time
-        time.sleep(2)
+        time.sleep(12)
         import requests
         import threading
         def shutdown_server():

@@ -1,6 +1,6 @@
 import queue
 import time
-from threading import Thread
+import threading
 def test_qtransact():
     q1 = queue.Queue()
     q2 = queue.Queue()
@@ -17,10 +17,10 @@ def test_qtransact():
                 q1._put('a')
                 q2._put('b')
 
-    th1 = Thread(target = tx1, args=[q1,q2])
+    th1 = threading.Thread(target = tx1, args=[q1,q2])
     th1.start()
     time.sleep(1)
-    th2 = Thread(target = tx2, args=[q1,q2])
+    th2 = threading.Thread(target = tx2, args=[q1,q2])
     th2.start()
     th1.join()
     th2.join()

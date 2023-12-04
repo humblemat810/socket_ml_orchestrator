@@ -1,7 +1,7 @@
 import socket
 import time
 
-from threading import Event, Condition, Lock, Thread
+import  threading
 
 class ReconnectingSocket:
     def __init__(self, host_port):
@@ -9,21 +9,35 @@ class ReconnectingSocket:
         self.host = host
         self.port = port
         self.sock = None
-        self.reconnecting_needed = Event()
-        self.reconnecting_lock = Lock()
-        self.th_reconnecting_watchdog = Thread(target = self.reconnecting_watchdog)
+        self.reconnecting_needed = threading.Event()
+        self.reconnecting_lock = threading.Lock()
+        self.retry_enabled = True
+        self.th_reconnecting_watchdog = threading.Thread(target = self.reconnecting_watchdog)
         self.th_reconnecting_watchdog.start()
         self.last_reconnect_time = time.time()
         self.reconnect_interval = 2
-        self.retry_enabled = True
+        
     def reconnecting_watchdog(self):
         while self.retry_enabled:
-            self.reconnecting_needed.wait()
-            with self.reconnecting_lock:
-                if time.time() - self.last_reconnect_time < self.reconnect_interval:
-                    self.connect()
-                    self.last_reconnect_time = time.time()
-                    self.reconnecting_needed.clear()
+            try:
+                self.reconnecting_needed.wait(timeout = 2)
+            except RuntimeError:
+                continue
+            except Exception as e:
+                print(e)
+                pass
+            try:    
+                self.reconnecting_lock.acquire(timeout = 2)
+            except RuntimeError:
+                continue
+            except Exception as e:
+                print(e)
+                pass
+            if time.time() - self.last_reconnect_time < self.reconnect_interval:
+                self.connect()
+                self.last_reconnect_time = time.time()
+                self.reconnecting_needed.clear()
+            self.reconnecting_lock.release()
     def connect(self):
         while self.retry_enabled:
             try:
