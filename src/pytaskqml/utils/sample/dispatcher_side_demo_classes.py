@@ -12,13 +12,16 @@ class my_word_count_dispatcher(Task_Worker_Manager):
         super().__init__(*arg, **kwarg)
         from collections import Counter
         self.count_dict = Counter()
-        
+    def on_shutdown(self):
+        for k,v in self.count_dict.items():
+            print(k,v)
+        return super().on_shutdown()
 
     def send_output(self, fresh_output_minibatch):
         for task_info, counter in fresh_output_minibatch:
             self.count_dict += counter
-            for k in counter.keys():
-                print(k,self.count_dict.get(k))
+            # for k in counter.keys():
+            #     print(k,self.count_dict.get(k))
         pass
     pass
 

@@ -55,6 +55,9 @@ class myclient():
         self.handle_send_exiting = threading.Event()
         self.handle_recv_exiting = threading.Event()
         self.handle_wkld_exiting = threading.Event()
+        self.th_recv    :threading.Thread = None
+        self.th_process :threading.Thread = None
+        self.th_send    :threading.Thread = None
         self.watchdog_timeout = watchdog_timeout
         self.creation_time = time.time()
         self.last_received = time.time()
@@ -190,7 +193,7 @@ class base_socket_worker(base_worker):
         #stop_ths = [threading.Thread(target=i.stop_client, args = []) for i in self.client_dict.values()]
         stop_ths = list(map(lambda x : threading.Thread(target=x.stop_client, name = f'graceful shutdown {x.id}'), self.client_dict.values()))
         list(map(lambda x : x.start() ,stop_ths))
-        list(map(lambda x : x.join() ,stop_ths))
+        list(map(lambda x : x.join() ,stop_ths))      
         self.graceful_stop_done.set()
         return True
     def handle_receive(self, client: myclient):
@@ -284,20 +287,20 @@ class base_socket_worker(base_worker):
         print(f"client {client.id} exited handle_receive while loop")
         client.handle_recv_exiting.set()
     
-    def handle_socket(self,client):
+    def handle_socket(self,client: myclient):
         self.logger.debug(f"client {client.id} handle_socket socket receive waiting")
-        th_recv = threading.Thread(target = self.handle_receive, args = [client], name = "handle_receive")
-        th_recv.start()
+        client.th_recv = threading.Thread(target = self.handle_receive, args = [client], name = "handle_receive")
+        client.th_recv.start()
         # loop process reopen socket
-        th_process = threading.Thread(target = self.handle_workload, args = [client], name = "handle_workload")
-        th_process.start()
+        client.th_process = threading.Thread(target = self.handle_workload, args = [client], name = "handle_workload")
+        client.th_process.start()
         # loop send
-        th_send = threading.Thread(target = self.handle_send, args = [client], name = "handle_send")
-        th_send.start()
+        client.th_send = threading.Thread(target = self.handle_send, args = [client], name = "handle_send")
+        client.th_send.start()
 
-        th_recv.join()
-        th_process.join()
-        th_send.join()
+        client.th_recv.join()
+        client.th_process.join()
+        client.th_send.join()
         self.logger.debug(f"client {client.id} handle_socket client {client.id} exits")
     def start(self, server_address = None, is_server = True):
         if server_address is None:
@@ -336,10 +339,10 @@ class base_socket_worker(base_worker):
                             except Exception as e:
                                 print(e)
                                 raise
-
-                        th_stop = threading.Thread(target=my_http_shutdown)
+                            print('normal shutdown')
+                        time.sleep(1)
+                        th_stop = threading.Thread(target=my_http_shutdown, name = f'worker{mytaskworker.server_address} httpd shutdown')
                         th_stop.start()
-                        th_stop.join()
                     else:
                         self._send_response(404, "Not found\n")
 
@@ -347,10 +350,10 @@ class base_socket_worker(base_worker):
             server_address = ('', self.management_port)
             httpd = HTTPServer(server_address, MyHandler)
             self.httpd = httpd
-            def start_server():
+            def run_server():
                 
                 httpd.serve_forever()
-            self.th_httpd = threading.Thread(target = start_server, name = f'worker-{server_address}.httpd')
+            self.th_httpd = threading.Thread(target = run_server, name = f'worker-{server_address}.httpd')
             self.th_httpd.start()
         while not self.stop_flag.is_set():
             if is_server:
@@ -400,8 +403,9 @@ class base_socket_worker(base_worker):
             
             
                 client_socket.close()
-
-                
-                
+        if is_server:
+            self.th_httpd.join()
+            self.logger.info('httpd stopped and joint')
+            
 
     

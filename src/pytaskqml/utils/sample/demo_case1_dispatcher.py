@@ -46,7 +46,7 @@ while f'worker.{i}' in config:
         else:
             break
 if args.n_worker is not None:
-    while i < args.n_worker:
+    while i <= args.n_worker:
         port = str(int(port) + 1)
         worker_config.append({"location": (str(location),int(port)),
                           "min_start_processing_length": int(worker_section.get("min_start_processing_length"))

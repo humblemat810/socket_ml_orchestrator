@@ -45,24 +45,46 @@ def main(n_worker = 1):
             p.start()
         
         import time
-        time.sleep(3)
+        time.sleep(13)
         import requests
         import threading
+        def url_request_with_my_err_handling(url):
+            cnt_retry = 0
+            cnt_retry_max = 3
+            errs= []
+            while True:
+                try:
+                    requests.get(url)
+                except ConnectionRefusedError: # server port shutdown
+                    break
+                except requests.exceptions.ConnectionError as e:
+                    import urllib3
+                    if isinstance(e.args[0],  urllib3.exceptions.ProtocolError):
+                        uePE = e.args[0]
+                        if uePE.args[0] == 'Connection aborted.':
+                            if isinstance(uePE.args[1], ConnectionResetError):
+                                CRE = uePE.args[1]
+                                if CRE.args[0] == 10054 and CRE.args[1] == 'An existing connection was forcibly closed by the remote host':
+                                    break # ok for this error
+                    elif isinstance(e.args[0],  urllib3.exceptions.MaxRetryError):
+                        ueMRE = e.args[0]
+                        if isinstance(ueMRE.reason, urllib3.exceptions.NewConnectionError):
+                            break
+                    else:
+                        raise
+                except Exception as e: # network disrupt, server busy
+                    cnt_retry += 1
+                    errs.append(e)
+                    if cnt_retry > cnt_retry_max:
+                        print(errs)
+                        raise
+                    continue
+            return True
         def shutdown_server():
-            while True:
-                try:
-                    requests.get('http://localhost:18000/shutdown')
-                except:
-                    continue
-                return
+            return url_request_with_my_err_handling('http://localhost:18000/shutdown')
         def shutdown_worker(i_worker):
-            while True:
-                try:
-                    requests.get(f'http://localhost:{22345+i_worker}/shutdown')
-                except:
-                    continue
-                return
-        
+            return url_request_with_my_err_handling(f'http://localhost:{22345+i_worker}/shutdown')
+            
         threading.Thread(target = shutdown_server).start() # worker
         from typing import List
         shutdown_ths: List[threading.Thread] = []
@@ -80,12 +102,12 @@ if __name__ == "__main__":
     import yappi
     yappi.set_clock_type("WALL")
     yappi.start()
-    main()
+    main(n_worker= 6)
     yappi.stop()
     import pytaskqml
     from pytaskqml import task_dispatcher, task_worker
     stats0 = yappi.get_thread_stats()
-    
+    print('func_stats')
     stats = yappi.get_func_stats(
         filter_callback=lambda x: yappi.module_matches(x, [pytaskqml, task_dispatcher, task_worker])
     )

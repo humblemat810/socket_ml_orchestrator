@@ -534,6 +534,9 @@ class Task_Worker_Manager():
     tasks are created here,
     worker get from elsewhere
     """
+    def on_shutdown(self):
+        
+        pass
     def __init__(self, worker_sorter_algo = 'heapq',
                  worker_sorter_factory = Worker_Sorter,
                  worker_factory = Worker,
@@ -597,6 +600,7 @@ class Task_Worker_Manager():
 
             def do_GET(self):
                 if self.path == '/shutdown':
+                    mytaskworker.on_shutdown()
                     mytaskworker.stop_flag.set()
                     mytaskworker.graceful_stop()
                     self._send_response(200, "Shutdown requested\n")
