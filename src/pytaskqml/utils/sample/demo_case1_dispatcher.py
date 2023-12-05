@@ -54,20 +54,20 @@ if args.n_worker is not None:
         i+=1
 
 import logging
-
+modulelogger = logging.getLogger()
+modulelogger.addHandler(logging.NullHandler)
 # Create a logger
 logger = logging.getLogger("demo_case1")
 logger.setLevel(log_level)
 
-# Create a console handler and set its format
-console_handler = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s",
-                              )
+                                )
 
-console_handler.setFormatter(formatter)
-
-# Add the console handler to the logger
 if log_screen:
+    console_handler = logging.StreamHandler()
+    
+    console_handler.setFormatter(formatter)
+
     logger.addHandler(console_handler)
 fh = logging.FileHandler('demo_case1.log', mode='w', encoding='utf-8')
 fh.setLevel(log_level)

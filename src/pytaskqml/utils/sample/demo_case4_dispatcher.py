@@ -34,26 +34,34 @@ from pytaskqml.utils.confparsers import dispatcher_side_worker_config_parser
 worker_config = dispatcher_side_worker_config_parser(config=config, parsed_args= args)
 
 import logging
-
 # Create a logger
+modulelogger = logging.getLogger()
+modulelogger.addHandler(logging.NullHandler)
 logger = logging.getLogger("demo_case1")
 logger.setLevel(log_level)
 
 # Create a console handler and set its format
-console_handler = logging.StreamHandler()
+
 formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s",
                               )
 
-console_handler.setFormatter(formatter)
+
 
 # Add the console handler to the logger
 if log_screen:
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-fh = logging.FileHandler('demo_case1.log', mode='w', encoding='utf-8')
-fh.setLevel(log_level)
-fh.setFormatter(formatter)
-logger.addHandler(fh)
-
+#fh = logging.FileHandler(filename='demo_case1.log', mode='w', encoding='utf-8')
+#fh.setLevel(log_level)
+#fh.setFormatter(formatter)
+#logger.addHandler(fh)
+from pytaskqml.utils.logutils import QueueFileHandler
+log_file_name = config.get("logger", "file")
+qfh = QueueFileHandler(log_file_name)
+qfh.setLevel(log_level)
+qfh.setFormatter(formatter)
+logger.addHandler(qfh)
 import pytaskqml.task_dispatcher as task_dispatcher
 task_dispatcher.modulelogger = logger
 from pytaskqml.utils.sample.dispatcher_side_demo_classes import my_word_count_config_aware_worker_abstract_factory_getter, my_word_count_dispatcher
@@ -107,5 +115,6 @@ def main():
         except:
             continue
         break
+    qfh.stop_flag.set()
 if __name__ == '__main__':
     main()

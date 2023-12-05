@@ -3,22 +3,22 @@ import traceback
 import os
 port = os.environ.get('port')
 process_id = os.getpid()
-# Create a logger
+class MyNullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+    def handle(self, record):
+        pass
+    def createLock(self):
+        self.lock = None
 
+# Remove the default StreamHandler from the root logger
+logging.getLogger().handlers.clear()
 
-# # Create a console handler and set its format
-# console_handler = logging.StreamHandler()
-# #formatter = logging.Formatter("%(levelname)s - %(message)s")
-# formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s")
-# console_handler.setFormatter(formatter)
+# Create a custom NullHandler
+null_handler = MyNullHandler()
 
-# # Add the console handler to the logger
-# logger.addHandler(console_handler)
-# fh = logging.FileHandler(f'server_ml_echo_worker{port}.log', mode='w', encoding='utf-8')
-# fh.setLevel(logging.DEBUG)
-# fh.setFormatter(formatter)
-# logger.addHandler(fh)
-
+# Add the NullHandler to the root logger
+logging.getLogger().addHandler(null_handler)
 
 
 import socket

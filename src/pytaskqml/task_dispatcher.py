@@ -1,21 +1,22 @@
 
     
 import logging
-modulelogger = logging.getLogger()
-# logger.setLevel(logging.DEBUG)
+class MyNullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+    def handle(self, record):
+        pass
+    def createLock(self):
+        self.lock = None
 
-# # # Create a console handler and set its format
-# console_handler = logging.StreamHandler()
-# #formatter = logging.Formatter("%(levelname)s - %(message)s")
-# formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s")
-# console_handler.setFormatter(formatter)
+# Remove the default StreamHandler from the root logger
+logging.getLogger().handlers.clear()
 
-# # Add the console handler to the logger
-# logger.addHandler(console_handler)
-# fh = logging.FileHandler('my_task_dispatcher.log', mode='w', encoding='utf-8')
-# fh.setLevel(logging.DEBUG)
-# fh.setFormatter(formatter)
-# logger.addHandler(fh)
+# Create a custom NullHandler
+null_handler = MyNullHandler()
+
+# Add the NullHandler to the root logger
+logging.getLogger().addHandler(null_handler)
 
 import socket
 import  queue

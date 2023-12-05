@@ -1,3 +1,21 @@
+import logging
+class MyNullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+    def handle(self, record):
+        pass
+    def createLock(self):
+        self.lock = None
+
+# Remove the default StreamHandler from the root logger
+logging.getLogger().handlers.clear()
+
+# Create a custom NullHandler
+null_handler = MyNullHandler()
+
+# Add the NullHandler to the root logger
+logging.getLogger().addHandler(null_handler)
+
 import multiprocessing
 import subprocess
 
