@@ -30,64 +30,51 @@ if type(log_screen) is str:
         log_screen = True
     else:
         raise ValueError(f"incorrect config for log_screen, expected UNION[FALSE, TRUE], get {log_screen}")
-worker_config = []
-i = 1
-while f'worker.{i}' in config:
-    worker_section = config[f'worker.{i}']
-    location = worker_section['location']
-    location, port = location.split(':')
-    worker_config.append({"location": (str(location),int(port)),
-                          "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
-                          })
-    i+=1
-    if args.n_worker is not None:
-        if i <= args.n_worker:
-            continue
-        else:
-            break
-if args.n_worker is not None:
-    while i <= args.n_worker:
-        port = str(int(port) + 1)
-        worker_config.append({"location": (str(location),int(port)),
-                          "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
-                          })
-        i+=1
+from pytaskqml.utils.confparsers import dispatcher_side_worker_config_parser
+worker_config = dispatcher_side_worker_config_parser(config=config, parsed_args= args)
 
 import logging
+# Create a logger
 modulelogger = logging.getLogger()
 modulelogger.addHandler(logging.NullHandler)
-# Create a logger
 logger = logging.getLogger("demo_case1")
 logger.setLevel(log_level)
 
-formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s",
-                                )
+# Create a console handler and set its format
 
+formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s",
+                              )
+
+
+
+# Add the console handler to the logger
 if log_screen:
     console_handler = logging.StreamHandler()
-    
     console_handler.setFormatter(formatter)
-
     logger.addHandler(console_handler)
-fh = logging.FileHandler('demo_case1.log', mode='w', encoding='utf-8')
-fh.setLevel(log_level)
-fh.setFormatter(formatter)
-logger.addHandler(fh)
-
+#fh = logging.FileHandler(filename='demo_case1.log', mode='w', encoding='utf-8')
+#fh.setLevel(log_level)
+#fh.setFormatter(formatter)
+#logger.addHandler(fh)
+from pytaskqml.utils.logutils import QueueFileHandler
+log_file_name = config.get("logger", "file")
+qfh = QueueFileHandler(log_file_name)
+qfh.setLevel(log_level)
+qfh.setFormatter(formatter)
+logger.addHandler(qfh)
 import pytaskqml.task_dispatcher as task_dispatcher
 task_dispatcher.modulelogger = logger
-from dispatcher_side_demo_classes import my_word_count_socket_producer_side_worker, my_word_count_dispatcher
+from pytaskqml.utils.sample.dispatcher_side_demo_classes import my_word_count_config_aware_worker_abstract_factory_getter, my_word_count_dispatcher
 import threading
 import time
 def main():
-    # worker_config = [#{"location": "local"},
-    #                  {"location": ('localhost', 12345), 
-    #                   "min_start_processing_length" : 42}, 
-    #                 ]
+
     import sys
     print(sys.modules[__name__])
+
+    my_worker_factory = my_word_count_config_aware_worker_abstract_factory_getter()
     my_task_worker_manager = my_word_count_dispatcher(
-                worker_factory=my_word_count_socket_producer_side_worker, 
+                worker_factory= my_worker_factory, 
                 worker_config = worker_config,
                 output_minibatch_size = 24,
                 management_port = management_port,
@@ -128,5 +115,6 @@ def main():
         except:
             continue
         break
+    qfh.stop_flag.set()
 if __name__ == '__main__':
     main()

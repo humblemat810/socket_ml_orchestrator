@@ -102,7 +102,7 @@ if __name__ == "__main__":
     import yappi
     yappi.set_clock_type("WALL")
     yappi.start()
-    main(n_worker= 6)
+    main(n_worker= 5)
     yappi.stop()
     import pytaskqml
     from pytaskqml import task_dispatcher, task_worker
