@@ -92,11 +92,10 @@ def main():
         # this function demonstrate main dispatch data such as video frame data or ref to video frame for example
         cnt = 0
         last_run = time.time()
+        words = ["apple", "banana", "cherry", "orange", "grape", "kiwi"]
         while not my_task_worker_manager.stop_flag.is_set():
             cnt+=1
             import random
-            words = ["apple", "banana", "cherry", "orange", "grape", "kiwi"]
-
             def generate_random_word():
                 return random.choice(words)
             frame_data = generate_random_word()#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}

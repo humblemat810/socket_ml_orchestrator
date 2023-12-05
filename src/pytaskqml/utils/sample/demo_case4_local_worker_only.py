@@ -74,11 +74,13 @@ def start_processes(dispatcher_worker_config):
     import os, pathlib
     with ChangeDirectory(str(pathlib.Path(__file__).parent)):
         processes = []
+        remote_worker_cnt = 0
         for i, worker_config in enumerate((dispatcher_worker_config)):
             if worker_config['location'] == 'local':
                 pass
             else:
-                processes.append(multiprocessing.Process(target = run_worker, args = [i]))
+                processes.append(multiprocessing.Process(target = run_worker, args = [remote_worker_cnt]))
+                remote_worker_cnt += 1
         processes.append(multiprocessing.Process(target=run_dispatcher, args = [n_worker]))
         # Start both processes
         for p in processes:

@@ -113,6 +113,7 @@ class base_socket_worker(base_worker):
         if time_diff > 0:
             time.sleep(time_diff)
         client_socket.sendall(calculated_checksum.encode() + length + serialized_data)
+        self.logger.info('succeed')
         self.last_run = cur_time
         
     
@@ -223,7 +224,7 @@ class base_socket_worker(base_worker):
                 client.last_received = time.time()
                 #print(f"receive non cond: {len(data_with_checksum)}")
                 while not client.stop_event.is_set() and len(data_with_checksum) >= max(42, self.min_start_processing_length):
-                    
+                    self.logger.info('receive')
                     #print(f"receive cond: {len(data_with_checksum)}")
                     self.logger.debug(f"client {client.id} handle_receive checking data integrity")
                     hash_algo = hashlib.md5()

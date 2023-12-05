@@ -58,10 +58,16 @@ console_handler.setFormatter(formatter)
 if log_screen:
     logger.addHandler(console_handler)
 
-fh = logging.FileHandler(f'server_ml_echo_worker{port}.log', mode='w', encoding='utf-8')
-fh.setLevel(logging.DEBUG)
-fh.setFormatter(formatter)
-logger.addHandler(fh)
+# fh = logging.FileHandler(f'server_ml_echo_worker{port}.log', mode='w', encoding='utf-8')
+# fh.setLevel(logging.DEBUG)
+# fh.setFormatter(formatter)
+# logger.addHandler(fh)
+from pytaskqml.utils.logutils import QueueFileHandler
+#log_file_name = config.get("logger", "file")
+qfh = QueueFileHandler(f"server_ml_echo_worker{port}.log")
+qfh.setLevel(log_level)
+qfh.setFormatter(formatter)
+logger.addHandler(qfh)
 logger.debug('start loading module')
 
 
@@ -73,6 +79,7 @@ def main():
                                             management_port=management_port, min_start_processing_length = 42)
     my_ML_socket_server.start()
     my_ML_socket_server.graceful_stop_done.wait()
+    qfh.stop_flag.set()
     print(f'worker{port} stopped')
 if __name__ == "__main__":
     main()

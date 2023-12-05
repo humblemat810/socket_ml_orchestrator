@@ -69,11 +69,16 @@ if log_screen:
     console_handler.setFormatter(formatter)
 
     logger.addHandler(console_handler)
-fh = logging.FileHandler('demo_case1.log', mode='w', encoding='utf-8')
-fh.setLevel(log_level)
-fh.setFormatter(formatter)
-logger.addHandler(fh)
-
+# fh = logging.FileHandler('demo_case1.log', mode='w', encoding='utf-8')
+# fh.setLevel(log_level)
+# fh.setFormatter(formatter)
+# logger.addHandler(fh)
+from pytaskqml.utils.logutils import QueueFileHandler
+log_file_name = config.get("logger", "file")
+qfh = QueueFileHandler(log_file_name)
+qfh.setLevel(log_level)
+qfh.setFormatter(formatter)
+logger.addHandler(qfh)
 import pytaskqml.task_dispatcher as task_dispatcher
 task_dispatcher.modulelogger = logger
 from dispatcher_side_demo_classes import my_word_count_socket_producer_side_worker, my_word_count_dispatcher
@@ -128,5 +133,6 @@ def main():
         except:
             continue
         break
+    qfh.stop_flag.set()
 if __name__ == '__main__':
     main()
