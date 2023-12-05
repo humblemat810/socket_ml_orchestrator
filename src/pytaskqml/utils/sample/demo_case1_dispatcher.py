@@ -104,6 +104,7 @@ def main():
     def dispatch_from_main():
         # this function demonstrate main dispatch data such as video frame data or ref to video frame for example
         cnt = 0
+        last_run = time.time()
         while not my_task_worker_manager.stop_flag.is_set():
             cnt+=1
             import random
@@ -113,8 +114,9 @@ def main():
                 return random.choice(words)
             frame_data = generate_random_word()#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}
             my_task_worker_manager.dispatch(frame_data)
-            #time.sleep(0.01)
-            logger.debug(f'__main__ : cnt {cnt} added')
+            now_time = time.time()
+            logger.debug(f'__main__ : cnt {cnt} added, interval = {now_time - last_run}')
+            last_run = now_time
 
     th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()

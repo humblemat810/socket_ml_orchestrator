@@ -3,7 +3,7 @@ import logging
 # Create a logger
 logger = logging.getLogger()
 
-from pytaskqml.task_dispatcher import Socket_Producer_Side_Worker, Task_Worker_Manager
+from pytaskqml.task_dispatcher import Socket_Producer_Side_Worker, Task_Worker_Manager, Local_Thread_Producer_Sider_Worker
 import time
 import threading
 
@@ -24,7 +24,25 @@ class my_word_count_dispatcher(Task_Worker_Manager):
             #     print(k,self.count_dict.get(k))
         pass
     pass
+def my_word_count_config_aware_worker_abstract_factory_getter(*args, **kwargs):
+    from functools import partial
+    from pytaskqml.task_dispatcher import config_aware_worker_factory
+    return partial(config_aware_worker_factory, 
+                   local_factory = my_word_count_local_producer_side_worker, 
+                   remote_factory = my_word_count_socket_producer_side_worker)
+class my_word_count_local_producer_side_worker(Local_Thread_Producer_Sider_Worker):
+    def workload(self, task_info, task_data):
+        import re
+        from collections import Counter
+        delimiters = [",", ";", "|", "."]
 
+# Create a regular expression pattern by joining delimiters with the "|" (OR) operator
+        pattern = "|".join(map(re.escape, delimiters))
+
+        # Split the string using the pattern as the delimiter
+        cnt = Counter(re.split(pattern, task_data))
+        return cnt
+        
 class my_word_count_socket_producer_side_worker(Socket_Producer_Side_Worker):
     
     def _parse_task_info(self, single_buffer_result):

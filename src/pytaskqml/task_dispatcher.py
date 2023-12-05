@@ -86,7 +86,7 @@ class Worker(ABC):
         if min_start_processing_length is None:
             min_start_processing_length = 4096
         self.min_start_processing_length = min_start_processing_length
-        self.th_map_result_watch: threading.Thread
+        
         self.queue_pending = self.task_manager.worker_pending[self.id]
         self.queue_dispatched = self.task_manager.worker_dispatched[self.id]
         self.stop_flag = threading.Event()
@@ -111,7 +111,6 @@ class Worker(ABC):
     def graceful_stop(self):
         self.stop_flag.set()
         self.th_map.join()
-        self.th_map_result_watch.join()
         self.graceful_stopped.set()
     def get_next_task(self):
         return self.queue_pending._first()
@@ -122,7 +121,9 @@ class Worker(ABC):
         
     def __getitem__(self):
         pass
+    
     def start(self):
+        self.last_run = time.time() - self.min_time_lapse_ns / 1e9
         def to_th_map():
             while not self.stop_flag.is_set():
                 try:
@@ -143,7 +144,8 @@ class Worker(ABC):
                     print(e)
                     raise
             self.logger.info(f'worker {self.id} th_map_result_watch loop finish')
-        th_map_result_watch = threading.Thread(target = to_th_reduce, args = [],name=f'{self.id} worker watcher')
+        th_map_result_watch = threading.Thread(target = to_th_reduce, args = [],
+                                               name = f'{self.id} worker watcher')
         th_map_result_watch.start()
         self.th_map_result_watch = th_map_result_watch
     @abstractmethod
@@ -206,6 +208,8 @@ class Worker(ABC):
                 self.logger.debug(f"Worker{self.id}.map dispatched_task_limit notifying")
                 if len(self.queue_dispatched) < self.dispatched_task_limit:
                     self.queue_dispatched.not_full.notify()
+                else:
+                    self.logger.debug(f"Worker{self.id}.map dispatched_task_limit full reached")
                 self.queue_dispatched.not_empty.notify()
                 self.logger.debug(f"Worker{self.id}.map dispatched_task_limit notified")
         else:
@@ -214,7 +218,7 @@ class Worker(ABC):
         self.logger.debug(f"Worker{self.id}.map queue_pending notify")
 
 
-    
+    @abstractmethod
     def reduce (self,dispatch_result= None, task_info = None, map_result = None):
         """
         override this method to implement reduce behavour, default send back to task result queue
@@ -261,9 +265,10 @@ class Worker(ABC):
                 pass
         with self.task_manager.q_task_completed.mutex:
             self.logger.debug(f"Worker{self.id}._reduce acquired q_task_completed mutex")
-            self.logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
+            
             while (not self.stop_flag.is_set() 
                    and self.task_manager.q_task_completed._qsize() >= self.task_manager.q_task_completed_limit):
+                self.logger.debug(f"Worker{self.id}._reduce q_task_completed is full")
                 try:
                     self.task_manager.q_task_completed.not_full.wait(timeout = 2)
                 except:
@@ -294,7 +299,7 @@ class Worker(ABC):
             if self.stop_flag.is_set():
                 return False
             self.queue_pending._put((priority,id), data)
-            self.logger.debug(f"Worker{self.id}.add_task before notify")
+            self.logger.debug(f"Worker{self.id}.add_task before notify not empty")
             self.queue_pending.not_empty.notify()
             task_assignment[id] = {
                             'task_data': data, 
@@ -354,6 +359,357 @@ class Worker(ABC):
                         self.task_manager.q_task_outstanding.not_full.notify()
                         
                     self.logger.debug(f"Worker{self.id}.add_task2 leaving")
+
+class Local_Thread_Producer_Sider_Worker(Worker):
+    def __init__(self, is_local, *arg, **kwarg):
+        super().__init__( *arg, **kwarg)
+        self.is_local = is_local
+        # self.client_socket = None not needed
+        self.stop_flag = threading.Event()
+        self.last_run = None
+        self.packet_cnt = 0
+        self.n_max_task = 24
+        self.task_queue = queue.Queue()
+        self.map_result_buffer = queue.Queue()
+        self.uuid_to_time : Dict[uuid.UUID, float] = {}
+        self.th_worker : threading.Thread = threading.Thread(target = self._workload, name = 'thread-worker')
+        self.min_time_lapse_ns = 6000
+    def start(self):
+        super().start()
+        self.th_worker.start()
+    def reduce(self, task_info ,dispatch_result): 
+
+        # override this function if you want to do something before reducing to the main queue after collect from worker
+        # dispatch_result : same as map_result you pass to self._reduce
+        return None
+    def dispatch( *args, **kwargs):
+        pass
+    def prepare_for_dispatch(self, task_info,  *args, **kwargs):
+        # this function allows developer to do something to prepare data
+        # before sending to worker
+        return task_info
+
+    def _dispatch(self, *args, **kwargs):
+        # this has to be implemented to tell what exactly to do to dispatch data to worker
+        # such as what protocol e.g. protobuf, to use to communicate with worker and also #
+        # transfer data or ref to data
+        self.logger.debug(f"Worker{self.id}.dispatch started dispatch")
+        
+        
+        self.uuid_to_time[args[0][0][1]] = args[0][0][0]
+        self.logger.debug(f"Worker{self.id}.dispatch serialised")
+
+        
+        cur_time = time.time()
+        
+        time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
+        if time_diff > 0:
+            self.logger.debug(f"Worker{self.id}.dispatch sleep for {time_diff}")
+            time.sleep(time_diff)
+        self.packet_cnt+=1
+        while not self.stop_flag.is_set():
+            
+            if self.task_queue.mutex.acquire(timeout= 2):
+                break
+            else:
+                continue
+        if self.stop_flag.is_set():
+            return
+        
+        if len(self.task_queue.queue) >= self.task_queue.maxsize:
+            while not self.stop_flag:
+                if self.task_queue.not_full.wait(timeout =2):
+                    break
+        self.task_queue._put(args[0])
+        self.task_queue.not_empty.notify()
+        self.task_queue.mutex.release()
+        
+        self.last_run = cur_time
+    def _workload(self):
+        # worker.handle_receive
+        while not self.stop_flag.is_set():
+            while not self.stop_flag.is_set():
+                if self.task_queue.mutex.acquire(timeout=2):
+                    break
+            if self.stop_flag.is_set():
+                continue
+            if len(self.task_queue.queue) == 0:
+                while not self.stop_flag.is_set():
+                    if self.task_queue.not_empty.wait(timeout= 2):
+                        break
+            if self.stop_flag.is_set():
+                continue
+            logging.debug(f'local worker{self.id} task q now not empty')
+            task_info, task_data = self.task_queue._get()
+            self.task_queue.not_full.notify()
+            self.task_queue.mutex.release()
+            self.uuid_to_time[task_info[1]] = task_info[0]
+            # worker.workload
+            result = self.workload(task_info,task_data)
+            # dispatcher.result_buffer_collect
+            use_self_buffer = True
+            
+            
+            if use_self_buffer:
+                
+                while not self.stop_flag.is_set():
+                    if self.map_result_buffer.mutex.acquire(timeout = 2):
+                        break
+                if self.stop_flag.is_set():
+                    continue
+                if len(self.map_result_buffer.queue) >= self.n_max_task:
+                    while not self.stop_flag.is_set():
+                        if self.map_result_buffer.not_full.wait(timeout= 2):
+                            break
+                logging.debug(f'local worker{self.id} task q now not empty')
+                self.map_result_buffer._put((task_info, result))
+                self.map_result_buffer.not_empty.notify()
+                self.map_result_buffer.mutex.release()
+            else:
+                result_queue = self.task_manager.q_task_completed
+                while not self.stop_flag.is_set():
+                    if result_queue.mutex.acquire(timeout = 2):
+                        break
+                if self.stop_flag.is_set():
+                    continue
+                if len(result_queue.queue) >= self.task_manager.q_task_completed_limit:
+                    while not self.stop_flag.is_set():
+                        if result_queue.not_full.wait(timeout= 2):
+                            break
+                logging.debug(f'local worker{self.id} task q now not empty')
+                result_queue._put((task_info, result))
+                result_queue.not_empty.notify()
+                result_queue.mutex.release()
+        self.logger.info(f'local thread worker {threading.current_thread().ident} leaving loop')
+    def workload(self, *args, **kwargs):
+        #to be overridden
+        pass
+    def _map_result_watcher(self):
+        while not self.stop_flag.is_set():
+            self.logger.debug('start listen map result')
+            from queue import Empty
+            try:
+                task_info, result = self.map_result_buffer.get(timeout=1)
+            except Empty:
+                continue
+            self.logger.debug('map result read')
+            success, task_info, map_result = self._parse_task_info(task_info, result)
+            if success:
+                self._reduce(map_result = map_result, task_info = task_info)
+        self.logger.info(f'local thread result watch {threading.current_thread().ident} leaving loop')
+    def _parse_task_info(self,task_info, result, *arg, **kwarg):
+        uuid = task_info[1]
+        task_time = self.uuid_to_time.get(uuid)
+        if task_time is not None:
+            task_info = (self.uuid_to_time[uuid], uuid)
+            success = True
+            map_result = result
+        else: # previous retry already solved in a race condition
+            success = False
+            task_info = None
+            map_result = None
+        
+        return success, task_info, map_result
+class Socket_Producer_Side_Worker(Worker):
+    def init_socket(self):
+        pass
+    def __init__(self, is_local, remote_info, *arg, **kwarg):
+        super().__init__(*arg, **kwarg)
+        self.uuid_to_time = {}
+        self.min_time_lapse_ns = 10000
+        self.packet_cnt = 0
+        self.last_run = time.time() - self.min_time_lapse_ns/ 1e9
+        self.is_local = is_local
+        self.auto_call_reduce = False
+        self.stop_flag = threading.Event()
+        self.socket_last_run = None
+        self.server_address = remote_info # eg example : ('localhost', 5000)
+        self.client_socket = ReconnectingSocket(self.server_address)
+        self.client_socket.connect()
+        self.th_result_buffer_collect : threading.Thread
+        self.th_map_result_watch: threading.Thread
+        
+        self.socket_start_time = time.time()
+        
+        self.map_result_buffer = queue.Queue()
+        self.watermark = time.time()
+        self.output_minibatch_size = 24
+    def start(self):
+        super().start()
+        
+        
+        th = threading.Thread(target = self.result_buffer_collect, args = [], name = f'result buffer collect {self.id}')
+        self.th_result_buffer_collect = th
+        self.th_result_buffer_collect.start()
+    def graceful_stop(self):
+        # how to graceful stop if user has created something that need special care to take down
+        # this example turns off reconnecting to let the socket thread able to shut down on disconnect
+        # instead of forever trying to reconnect and can never graceful stop
+        super().graceful_stop()
+        
+        self.th_map_result_watch.join()
+        if self.is_local:
+            pass
+        else:
+            self.client_socket.retry_enabled = False
+        
+    def result_buffer_collect(self):
+        # this function is require to implement what to do when receive data from variable
+        # self.client_socket
+        
+        client_socket = self.client_socket
+        client_socket.sock.settimeout(2)
+        data_with_checksum = bytes()
+        self.socket_last_run = time.time()
+        cnt = 0
+        while not self.stop_flag.is_set():
+            try:
+                try:
+                    data = client_socket.recv(115757000)
+                except socket.timeout as te:
+                    continue # check for stop event
+                if data is None:
+                    continue
+                data_with_checksum = data_with_checksum + data
+                self.logger.debug('worker data received')
+                #print(f"receive non cond: {len(data_with_checksum)}")
+                while not self.stop_flag.is_set() and (len(data_with_checksum) >= self.min_start_processing_length):
+                    #print(f"receive cond: {len(data_with_checksum)}")
+                    hash_algo = hashlib.md5()
+                    
+                    checksum = data_with_checksum[:32].decode()
+                    length = data_with_checksum[32:42]
+                    hash_algo.update(length)
+                    length = int(data_with_checksum[32:42].decode())
+                    received_data = data_with_checksum[42:42+length]
+                    hash_algo.update(received_data)
+                    calculated_checksum = hash_algo.hexdigest()
+                    
+                    if checksum == calculated_checksum:
+                        try:
+                            self.map_result_buffer.put(received_data, timeout = 1)
+                        except queue.Full:
+                            continue
+                        data_with_checksum = data_with_checksum[42+length:]
+                    
+                        time_now =  time.time() 
+                        # uptime = time_now- self.socket_start_time
+                        # uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
+                        #file.write(received_data)  # Write data to file
+                        cnt += 1
+                        self.logger.debug(f'worker_data integrity confirmed packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
+                        self.socket_last_run = time_now
+                    else:
+                        self.logger.debug("from worker receive cond Checksum mismatch. Data corrupted.")
+                        client_socket.close()
+                        return
+            except ConnectionResetError as e:
+                # TO-DO graceful stop
+                client_socket.close()
+                return
+            except UnicodeDecodeError:
+                client_socket.close()
+                return
+            except OSError:
+                client_socket.close()
+                return
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                client_socket.close()
+                return
+            
+    def reduce(self, task_info ,dispatch_result): 
+
+        # override this function if you want to do something before reducing to the main queue after collect from worker
+        # dispatch_result : same as map_result you pass to self._reduce
+        return None
+    def _map_result_watcher(self):
+        while not self.stop_flag.is_set():
+            self.logger.debug('start listen map result')
+            from queue import Empty
+            try:
+                result = self.map_result_buffer.get(timeout=1)
+            except Empty:
+                continue
+            self.logger.debug('map result read')
+            success, task_info, map_result = self._parse_task_info(result)
+            if success:
+                self._reduce(map_result = map_result, task_info = task_info)
+            
+    def _parse_task_info(self, single_buffer_result):
+        "implement your own way such that: task_info = (time.time, messageuuid)"
+        # response = lipsync_schema_pb2.ResponseData()
+        # response.ParseFromString(result) 
+        # result = {'messageuuid': response.messageuuid, 'face': np.array(response.face).reshape(96,96,3)}
+        # if response.messageuuid not in self.uuid_to_time:
+        #     # previous run result stuck on socket buffer
+        #     print(f"previous run result stuck on socket buffer response.messageuuid={response.messageuuid}")
+        #     success = False
+        # task_info = (self.uuid_to_time[response.messageuuid], response.messageuuid)
+        success = True
+        task_info = None
+        map_result = None
+        return success, task_info, map_result
+        
+    def prepare_for_dispatch(self,task_info,  *args, **kwargs):
+        # this function allows developer to do something to prepare data
+        # before sending to worker
+        return task_info
+    def dispatch(self, *args):
+        """_summary_
+
+        Args:
+            message (_type_): _description_
+
+        Returns:
+            _str_: _Serialized dispatched data_
+            
+        implement own logic to create outmessage from args    
+        """
+        outmessage = ""
+        return outmessage
+    def _dispatch(self, *args, **kwargs):
+        # this has to be implemented to tell what exactly to do to dispatch data to worker
+        # such as what protocol e.g. protobuf, to use to communicate with worker and also #
+        # transfer data or ref to data
+        self.logger.debug(f"Worker{self.id}.dispatch started dispatch")
+        
+        serialized_data = self.dispatch(*args)
+        self.uuid_to_time[args[0][0][1]] = args[0][0][0]
+        self.logger.debug(f"Worker{self.id}.dispatch serialised")
+        # Calculate checksum
+        length = len(serialized_data) 
+        if length > 1e10:
+            raise ValueError("send: data frame size cannot be greater thatn 1e10 bytes")
+        length = str(length).zfill(10).encode()
+        checksum = hashlib.md5(length + serialized_data).hexdigest()
+        #time.sleep(0.0005)
+        # Send data and checksum
+        cur_time = time.time()
+        
+        time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
+        #print('send: cur_time ', cur_time, ", last_run ", last_run, ", length ", length)
+        if time_diff > 0:
+            self.logger.debug(f"Worker{self.id}.dispatch sleep for {time_diff}")
+            time.sleep(time_diff)
+        self.packet_cnt+=1
+        if self.client_socket is not None:
+            self.logger.debug(f"Worker{self.id}.dispatch sending serialied data")
+            self.client_socket.sendall(checksum.encode() + length + serialized_data)
+            self.logger.debug(f"Worker{self.id}.dispatch sent serialied data")
+        self.last_run = cur_time
+
+def config_aware_worker_factory(is_local, remote_info = None, 
+                                local_factory: object = Local_Thread_Producer_Sider_Worker,
+                                remote_factory: object = Socket_Producer_Side_Worker, *arg, **kwarg):
+    if not (bool(is_local) ^ bool(remote_info)):
+        raise ValueError('is_local is True then cnanot specify remote_info')
+    if is_local:
+        return local_factory(is_local, *arg, **kwarg)
+    else:
+        return remote_factory(is_local, remote_info, *arg, **kwarg)
+              
 class Worker_Sorter():
     """
     worker are created here,
@@ -539,7 +895,7 @@ class Task_Worker_Manager():
         pass
     def __init__(self, worker_sorter_algo = 'heapq',
                  worker_sorter_factory = Worker_Sorter,
-                 worker_factory = Worker,
+                 worker_factory = config_aware_worker_factory,
                  worker_config = None,
                  output_minibatch_size = 1,
                  task_retry_timeout = 3,
@@ -562,10 +918,10 @@ class Task_Worker_Manager():
         if worker_config is None:
             worker_config = []
         self.worker_config = worker_config
-        self.q_task_outstanding: OrderedDictQueue.OrderedDictQueue = ODictQueue(maxsize=50)  # pop first often, prioritize unoften, error re-enter from workign on
+        self.q_task_outstanding: OrderedDictQueue = ODictQueue(maxsize=50)  # pop first often, prioritize unoften, error re-enter from workign on
         self.q_task_completed = queue.PriorityQueue() # frames order is important to allow smooth streaming
-        self.worker_pending : Dict[int, OrderedDictQueue.dictQueue] = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
-        self.worker_dispatched : Dict[int, OrderedDictQueue.dictQueue] = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
+        self.worker_pending : Dict[int, dictQueue] = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
+        self.worker_dispatched : Dict[int, dictQueue] = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
         self.worker_sorter_algo=worker_sorter_algo # [heapq, bincount]
         self.q_task_completed_limit = 1000
         self.th_assign = None
@@ -655,18 +1011,16 @@ class Task_Worker_Manager():
         self.logger.debug(f"Task_Worker_Manager.assign_task called {self.assign_task_called}")
         while not self.stop_flag.is_set():
             try:
-                with self.q_task_outstanding.not_empty:
+                with self.q_task_outstanding.mutex:
                     while (len(self.q_task_outstanding) <= 0) and not self.stop_flag.is_set():
                         try:
+                            self.logger.debug("q_task_outstanding empty, wait not empty")
                             self.q_task_outstanding.not_empty.wait(timeout = 2)
                         except Exception as e:
                             continue
                     if self.stop_flag.is_set():
                         continue
                     packed = self.q_task_outstanding._popleft()
-                    if packed is None:
-                        self.logger.warning("pop should not happen when empty, tracker has error")
-                        continue
                     if len(self.q_task_outstanding) > 0:
                         self.q_task_outstanding.not_empty.notify()
                 task_id, data = packed
@@ -706,6 +1060,7 @@ class Task_Worker_Manager():
                ((len(self.q_task_outstanding) >= self.max_outstanding) 
                 and not ignore_size_check)):
             try:
+                self.logger.debug("q_task_outstanding full, wait not f")
                 self.q_task_outstanding.not_full.wait(timeout=2)
             except Exception as e:
                 continue
@@ -737,17 +1092,18 @@ class Task_Worker_Manager():
                         try:
                             self.q_task_completed.not_empty.wait(timeout = 2)
                         except Exception as e:
+                            self.logger.debug(f"Task_manager.on_task_complete empty_waited_count={empty_waited_count}")
                             continue
                         empty_waited_count += 1
                         self.logger.debug(f"Task_manager.on_task_complete q size={self.q_task_completed._qsize()}")
-                        self.logger.debug(f"Task_manager.on_task_complete empty_waited_count={empty_waited_count}")
+                        
                     if self.stop_flag.is_set():
                         continue
                     if self.q_task_completed._qsize() >= self.output_minibatch_size:
                         self.logger.debug("Task_manager.on_task_complete waited minibatch")
                         cnt_fresh = 0
                         for i in range(self.output_minibatch_size):
-                            self.logger.debug(f'Task_manageron.on_task_complete minibatch record {i}')
+                            self.logger.debug(f'Task_manager.on_task_complete minibatch record {i}')
                             completed = self.q_task_completed._get()
                             self.q_task_completed.not_full.notify()
                             if self.q_task_completed._qsize() > 0:
@@ -802,292 +1158,3 @@ def print_all_queues(my_task_worker_manager: Task_Worker_Manager = None):
 from pytaskqml.utils.reconnecting_socket import ReconnectingSocket
 import hashlib
 
-def config_aware_worker_factory(is_local, remote_info = None, *arg, **kwarg):
-    if not (is_local ^ remote_info):
-        raise ValueError('is_local is True then cnanot specify remote_info')
-    if is_local:
-        return Local_Thread_Producer_Sider_Worker(is_local, *arg, **kwarg)
-    else:
-        return Socket_Producer_Side_Worker(is_local, remote_info, *arg, **kwarg)
-
-
-class Local_Thread_Producer_Sider_Worker(Worker):
-    def __init__(self, is_local, *arg, **kwarg):
-        super().__init__( *arg, **kwarg)
-        self.is_local = is_local
-        # self.client_socket = None not needed
-        self.stop_flag = threading.Event()
-        self.last_run = None
-        self.packet_cnt = 0
-        self.task_queue = queue.Queue()
-        self.map_result_buffer = queue.Queue()
-        self.uuid_to_time = Dict[uuid.UUID, float]
-        self.th_worker : threading.Thread = threading.Thread(target = self._workload)
-        self.min_time_lapse_ns = 6000
-    def start(self):
-        self.th_worker.start()        
-    
-
-    def _dispatch(self, *args, **kwargs):
-        # this has to be implemented to tell what exactly to do to dispatch data to worker
-        # such as what protocol e.g. protobuf, to use to communicate with worker and also #
-        # transfer data or ref to data
-        self.logger.debug(f"Worker{self.id}.dispatch started dispatch")
-        
-        
-        self.uuid_to_time[args[0][0][1]] = args[0][0][0]
-        self.logger.debug(f"Worker{self.id}.dispatch serialised")
-
-        
-        cur_time = time.time()
-        
-        time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
-        if time_diff > 0:
-            self.logger.debug(f"Worker{self.id}.dispatch sleep for {time_diff}")
-            time.sleep(time_diff)
-        self.packet_cnt+=1
-        with self.task_queue.mutex():
-            self.task_queue._put()
-        self.last_run = cur_time
-    def _workload(self):
-        # worker.handle_receive
-        while not self.stop_flag.is_set():
-            while not self.stop_flag.is_set():
-                try:
-                    self.task_queue.mutex.acquire(timeout=2)
-                except RuntimeError:
-                    continue
-            if len(self.task_queue) == 0:
-                while not self.stop_flag.is_set():
-                    try:
-                        self.task_queue.not_empty.wait(timeout= 2)
-                    except RuntimeError:
-                        continue
-                    break
-            logging.debug(f'local worker{self.id} task q now not empty')
-            task_info, task_data = self.task_queue._get()
-            self.task_queue.mutex.release()
-            # worker.workload
-            result = self.workload(task_info,task_data)
-            # dispatcher.result_buffer_collect
-            while not self.stop_flag.is_set():
-                try:
-                    self.map_result_buffer.mutex.acquire(timeout=2)
-                except RuntimeError:
-                    continue
-            if len(self.task_queue) >= self.task_queue.maxsize:
-                self.task_queue.not_full.wait()
-            logging.debug(f'local worker{self.id} task q now not empty')
-            self.map_result_buffer._put((task_info, result))
-            self.map_result_buffer.mutex.release()
-    
-    def workload(self, *args, **kwargs):
-        #to be overridden
-        pass
-    def _map_result_watcher(self):
-        while not self.stop_flag.is_set():
-            self.logger.debug('start listen map result')
-            from queue import Empty
-            try:
-                task_info, result = self.map_result_buffer.get(timeout=1)
-            except Empty:
-                continue
-            self.logger.debug('map result read')
-            success, task_info, map_result = self._parse_task_info(task_info, result)
-            if success:
-                self._reduce(map_result = map_result, task_info = task_info)
-    def _parse_task_info(self,task_info, result, *arg, **kwarg):
-        task_time = self.uuid_to_time.get(uuid)
-        if task_time is not None:
-            task_info = (self.uuid_to_time[uuid], uuid)
-            success = True
-            map_result = result
-        else: # previous retry already solved in a race condition
-            success = False
-            task_info = None
-            map_result = None
-        
-        return success, task_info, map_result
-class Socket_Producer_Side_Worker(Worker):
-    def init_socket(self):
-        pass
-    def __init__(self, is_local, remote_info, *arg, **kwarg):
-        super().__init__(*arg, **kwarg)
-        self.uuid_to_time = {}
-        self.min_time_lapse_ns = 10000
-        self.packet_cnt = 0
-        self.last_run = time.time() - self.min_time_lapse_ns/ 1e9
-        self.is_local = is_local
-        self.auto_call_reduce = False
-        self.stop_flag = threading.Event()
-        self.socket_last_run = None
-        self.server_address = remote_info # eg example : ('localhost', 5000)
-        self.client_socket = ReconnectingSocket(self.server_address)
-        self.client_socket.connect()
-        th = threading.Thread(target = self.result_buffer_collect, args = [], name = f'result buffer collect {self.id}')
-        self.th_result_buffer_collect = th
-        self.socket_start_time = time.time()
-        
-        self.map_result_buffer = queue.Queue()
-        self.watermark = time.time()
-        self.output_minibatch_size = 24
-    def start(self):
-        super().start()
-        self.th_result_buffer_collect.start()
-    def graceful_stop(self):
-        # how to graceful stop if user has created something that need special care to take down
-        # this example turns off reconnecting to let the socket thread able to shut down on disconnect
-        # instead of forever trying to reconnect and can never graceful stop
-        super().graceful_stop()
-        if self.is_local:
-            pass
-        else:
-            self.client_socket.retry_enabled = False
-        
-    def result_buffer_collect(self):
-        # this function is require to implement what to do when receive data from variable
-        # self.client_socket
-        
-        client_socket = self.client_socket
-        client_socket.sock.settimeout(2)
-        data_with_checksum = bytes()
-        self.socket_last_run = time.time()
-        cnt = 0
-        while not self.stop_flag.is_set():
-            try:
-                try:
-                    data = client_socket.recv(115757000)
-                except socket.timeout as te:
-                    continue # check for stop event
-                if data is None:
-                    continue
-                data_with_checksum = data_with_checksum + data
-                self.logger.debug('worker data received')
-                #print(f"receive non cond: {len(data_with_checksum)}")
-                while not self.stop_flag.is_set() and (len(data_with_checksum) >= self.min_start_processing_length):
-                    #print(f"receive cond: {len(data_with_checksum)}")
-                    hash_algo = hashlib.md5()
-                    
-                    checksum = data_with_checksum[:32].decode()
-                    length = data_with_checksum[32:42]
-                    hash_algo.update(length)
-                    length = int(data_with_checksum[32:42].decode())
-                    received_data = data_with_checksum[42:42+length]
-                    hash_algo.update(received_data)
-                    calculated_checksum = hash_algo.hexdigest()
-                    
-                    if checksum == calculated_checksum:
-                        try:
-                            self.map_result_buffer.put(received_data, timeout = 1)
-                        except queue.Full:
-                            continue
-                        data_with_checksum = data_with_checksum[42+length:]
-                    
-                        time_now =  time.time() 
-                        # uptime = time_now- self.socket_start_time
-                        # uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
-                        #file.write(received_data)  # Write data to file
-                        cnt += 1
-                        self.logger.debug(f'worker_data integrity confirmed packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
-                        self.socket_last_run = time_now
-                    else:
-                        self.logger.debug("from worker receive cond Checksum mismatch. Data corrupted.")
-                        client_socket.close()
-                        return
-            except ConnectionResetError as e:
-                # TO-DO graceful stop
-                client_socket.close()
-                return
-            except UnicodeDecodeError:
-                client_socket.close()
-                return
-            except OSError:
-                client_socket.close()
-                return
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                client_socket.close()
-                return
-            
-    def reduce(self, task_info ,dispatch_result): 
-
-        # override this function if you want to do something before reducing to the main queue after collect from worker
-        # dispatch_result : same as map_result you pass to self._reduce
-        return None
-    def _map_result_watcher(self):
-        while not self.stop_flag.is_set():
-            self.logger.debug('start listen map result')
-            from queue import Empty
-            try:
-                result = self.map_result_buffer.get(timeout=1)
-            except Empty:
-                continue
-            self.logger.debug('map result read')
-            success, task_info, map_result = self._parse_task_info(result)
-            if success:
-                self._reduce(map_result = map_result, task_info = task_info)
-            
-    def _parse_task_info(self, single_buffer_result):
-        "implement your own way such that: task_info = (time.time, messageuuid)"
-        # response = lipsync_schema_pb2.ResponseData()
-        # response.ParseFromString(result) 
-        # result = {'messageuuid': response.messageuuid, 'face': np.array(response.face).reshape(96,96,3)}
-        # if response.messageuuid not in self.uuid_to_time:
-        #     # previous run result stuck on socket buffer
-        #     print(f"previous run result stuck on socket buffer response.messageuuid={response.messageuuid}")
-        #     success = False
-        # task_info = (self.uuid_to_time[response.messageuuid], response.messageuuid)
-        success = True
-        task_info = None
-        map_result = None
-        return success, task_info, map_result
-        
-    def prepare_for_dispatch(self,task_info,  *args, **kwargs):
-        # this function allows developer to do something to prepare data
-        # before sending to worker
-        return task_info
-    def dispatch(self, *args):
-        """_summary_
-
-        Args:
-            message (_type_): _description_
-
-        Returns:
-            _str_: _Serialized dispatched data_
-            
-        implement own logic to create outmessage from args    
-        """
-        outmessage = ""
-        return outmessage
-    def _dispatch(self, *args, **kwargs):
-        # this has to be implemented to tell what exactly to do to dispatch data to worker
-        # such as what protocol e.g. protobuf, to use to communicate with worker and also #
-        # transfer data or ref to data
-        self.logger.debug(f"Worker{self.id}.dispatch started dispatch")
-        
-        serialized_data = self.dispatch(*args)
-        self.uuid_to_time[args[0][0][1]] = args[0][0][0]
-        self.logger.debug(f"Worker{self.id}.dispatch serialised")
-        # Calculate checksum
-        length = len(serialized_data) 
-        if length > 1e10:
-            raise ValueError("send: data frame size cannot be greater thatn 1e10 bytes")
-        length = str(length).zfill(10).encode()
-        checksum = hashlib.md5(length + serialized_data).hexdigest()
-        #time.sleep(0.0005)
-        # Send data and checksum
-        cur_time = time.time()
-        
-        time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
-        #print('send: cur_time ', cur_time, ", last_run ", last_run, ", length ", length)
-        if time_diff > 0:
-            self.logger.debug(f"Worker{self.id}.dispatch sleep for {time_diff}")
-            time.sleep(time_diff)
-        self.packet_cnt+=1
-        if self.client_socket is not None:
-            self.logger.debug(f"Worker{self.id}.dispatch sending serialied data")
-            self.client_socket.sendall(checksum.encode() + length + serialized_data)
-            self.logger.debug(f"Worker{self.id}.dispatch sent serialied data")
-        self.last_run = cur_time
-        
