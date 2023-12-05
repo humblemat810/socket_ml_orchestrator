@@ -32,6 +32,55 @@ The current framework / inheritance tree is as follows:
 
 A simple self shutdown simplehttpd is used to shutdown the worker just in case, using the route /shutdown
 
+# Benchmarking
+
+A random word count test case is made. Each word is sent to the worker and a counter has to be returned
+However, celery convert the results into json and it cannot serialise custom objects. So to make the comparison fair, the returned dict is converted into counter before adding.
+
+
+Against celery:
+using 7 workers on pytaskqml the results are:
+##
+banana 904  
+apple 950  
+orange 967  
+grape 929  
+kiwi 947  
+cherry 933  
+
+and using celery results are:
+##
+grape 722  
+apple 701  
+cherry 726  
+kiwi 728  
+banana 709  
+orange 722  
+
+Moring, with a bit trial and error, using 2 in memory local thread worker
+plus 2 socket worker, the so far best result is 3 times the redis celery result
+
+
+##
+orange 1804  
+apple 1766  
+cherry 1798  
+banana 1872  
+kiwi 1833  
+grape 1911  
+
+Interestingly, using only local worker with 7 workers,
+the result is much worse:
+
+##
+kiwi 409  
+grape 382  
+cherry 410  
+orange 375  
+banana 396  
+apple 380  
+
+For this particular test case, pytaskqml outruns celery.
 To dos  
  1. Framework for the task queuer to work on task directly if it has capacity.
  2. More test cases such as gpu workload tests

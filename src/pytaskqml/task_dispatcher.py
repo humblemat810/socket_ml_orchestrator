@@ -1069,7 +1069,8 @@ class Task_Worker_Manager():
             self.q_task_outstanding.mutex.release()
             return False
             
-            
+        while task_id in self.q_task_outstanding.queue:
+            task_id = str(uuid.uuid1())
         self.q_task_outstanding._put(task_id, data)
         
         self.q_task_outstanding.not_empty.notify()

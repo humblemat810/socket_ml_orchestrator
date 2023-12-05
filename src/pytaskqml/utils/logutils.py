@@ -17,8 +17,9 @@ class QueueFileHandler(QueueHandler):
         self.file_name = file_name
         self.queue = queue.Queue()
         self.th_write = threading.Thread(target=self.write_loop, args = [self.file_name, self.queue])
-        self.th_write.start()
         self.stop_flag = threading.Event()
+        self.th_write.start()
+        
     def write_loop(self, file_name, q: queue.Queue):
         while not self.stop_flag.is_set():
             time.sleep(2)
@@ -29,6 +30,7 @@ class QueueFileHandler(QueueHandler):
             with open(file_name, 'a') as f:
                 while len(new_deque) > 0:
                     f.write(self.formatter.format(new_deque.popleft()) + "\n")
+        
 
     def emit(self, record):
         super().emit(record)
