@@ -903,9 +903,11 @@ class Task_Worker_Manager():
                  task_stale_timeout = 6,
                  management_port = 59842, 
                  logger = None,
-                 retry_watcher_on = False):
+                 retry_watcher_on = False,
+                 data_ingress_type = 'socket',
+                 data_ingress_info = "localhost:41230"):
         if logger is None:
-            logger = modulelogger
+            logger = logging.getLogger('__file__')
         self.logger: logging.Logger = logger
         if worker_config is not None:
             self.n_worker = len(worker_config)
@@ -937,6 +939,9 @@ class Task_Worker_Manager():
         self.init_locks()
         self.management_port = management_port
         self.graceful_stopped = threading.Event()
+        self.th_input:threading.Thread = None
+        self.data_ingress_type = data_ingress_type
+        self.data_ingress_info = data_ingress_info
         #self.init_manager(port=self.manager_port)
         self.set_manage_httpd()
     def graceful_stop(self):
@@ -946,6 +951,16 @@ class Task_Worker_Manager():
         self.th_assign.join()
         self.th_clean_up.join()
         self.graceful_stopped.set()
+        if self.th_input is not None:
+            self.th_input.join()
+    
+    def on_input_data_received(self, data):
+        pass
+
+    def set_up_ingress_data(self):
+        if self.data_ingress_type == 'socket':
+            self.th_ingress = threading.Thread(target = self.on_input_data_received, args = [])
+            
     def set_manage_httpd(self):
         mytaskworker = self
         class MyHandler(BaseHTTPRequestHandler):
@@ -1000,6 +1015,7 @@ class Task_Worker_Manager():
         th = threading.Thread(target = self.on_task_complete, args = [], name='task work manager task complete')
         th.start()
         self.th_clean_up = th
+        
     def send_output(self,fresh_output_minibatch):
         # to be overwrrtten to achieve actual task to output the data such as disk or network
         print(f"len fresh output = {len(fresh_output_minibatch)}")
