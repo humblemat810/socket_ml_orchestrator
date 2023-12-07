@@ -35,8 +35,8 @@ import logging
 stop_event = threading.Event()
 from collections import Counter
 
-from celery_redis_word_count_checksum import count_words
-
+from celery_redis_word_count import count_words
+import hashlib
 def dispatch_from_main():
     last_run = time.time()
     cnt = 0
@@ -47,7 +47,16 @@ def dispatch_from_main():
         def generate_random_word():
             return random.choice(words)
         text = generate_random_word()#{"frame_number": cnt, "face": np.random.rand(96,96,6), 'mel': np.random.rand(80,16)}
-        result = count_words.delay(text)
+        length = len(text)
+        hash_algo = hashlib.md5()
+        length = str(length).zfill(10).encode()
+        hash_algo.update(length)
+        hash_algo.update(text)
+        calculated_checksum = hash_algo.hexdigest()
+        cur_time = time.time()
+        final_md5_text = calculated_checksum.encode() + length + text
+        
+        result = count_words.delay(final_md5_text)
         mycnt = result.get(timeout=1)
         myCnt = Counter()
         for k, v in mycnt.items():
