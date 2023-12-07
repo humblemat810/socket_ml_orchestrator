@@ -35,7 +35,7 @@ import logging
 stop_event = threading.Event()
 from collections import Counter
 
-from celery_redis_word_count import count_words
+from celery_redis_word_count_checksum import count_words
 
 def dispatch_from_main():
     last_run = time.time()

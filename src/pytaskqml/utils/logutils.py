@@ -16,7 +16,7 @@ class QueueFileHandler(QueueHandler):
         super().__init__(*args, **kwargs)
         self.file_name = file_name
         self.queue = queue.Queue()
-        self.th_write = threading.Thread(target=self.write_loop, args = [self.file_name, self.queue])
+        self.th_write = threading.Thread(target=self.write_loop, args = [self.file_name, self.queue], name = 'logger-asyncwriter')
         self.stop_flag = threading.Event()
         self.th_write.start()
         

@@ -1,5 +1,5 @@
 
-    
+import traceback
 import logging
 class MyNullHandler(logging.Handler):
     def emit(self, record):
@@ -511,6 +511,8 @@ class Local_Thread_Producer_Sider_Worker(Worker):
             map_result = None
         
         return success, task_info, map_result
+from pytaskqml.task_worker import parse_data, DataIngressIncomplete, DataCorruptionError
+from types import MethodType
 class Socket_Producer_Side_Worker(Worker):
     def init_socket(self):
         pass
@@ -529,12 +531,13 @@ class Socket_Producer_Side_Worker(Worker):
         self.client_socket.connect()
         self.th_result_buffer_collect : threading.Thread
         self.th_map_result_watch: threading.Thread
-        
+        self.checksum_on = False
         self.socket_start_time = time.time()
         
         self.map_result_buffer = queue.Queue()
         self.watermark = time.time()
         self.output_minibatch_size = 24
+        self._send = MethodType(base_socket_worker._send, self)
     def start(self):
         super().start()
         
@@ -557,7 +560,7 @@ class Socket_Producer_Side_Worker(Worker):
     def result_buffer_collect(self):
         # this function is require to implement what to do when receive data from variable
         # self.client_socket
-        
+        checksum_on = self.checksum_on
         client_socket = self.client_socket
         client_socket.sock.settimeout(2)
         data_with_checksum = bytes()
@@ -576,34 +579,27 @@ class Socket_Producer_Side_Worker(Worker):
                 #print(f"receive non cond: {len(data_with_checksum)}")
                 while not self.stop_flag.is_set() and (len(data_with_checksum) >= self.min_start_processing_length):
                     #print(f"receive cond: {len(data_with_checksum)}")
-                    hash_algo = hashlib.md5()
-                    
-                    checksum = data_with_checksum[:32].decode()
-                    length = data_with_checksum[32:42]
-                    hash_algo.update(length)
-                    length = int(data_with_checksum[32:42].decode())
-                    received_data = data_with_checksum[42:42+length]
-                    hash_algo.update(received_data)
-                    calculated_checksum = hash_algo.hexdigest()
-                    
-                    if checksum == calculated_checksum:
-                        try:
-                            self.map_result_buffer.put(received_data, timeout = 1)
-                        except queue.Full:
-                            continue
-                        data_with_checksum = data_with_checksum[42+length:]
-                    
-                        time_now =  time.time() 
-                        # uptime = time_now- self.socket_start_time
-                        # uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
-                        #file.write(received_data)  # Write data to file
-                        cnt += 1
-                        self.logger.debug(f'worker_data integrity confirmed packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
-                        self.socket_last_run = time_now
-                    else:
+                    try:
+                        length, received_data, calculated_checksum = parse_data(data_with_checksum, checksum_on=checksum_on)
+                    except DataIngressIncomplete as e:
+                        break
+                    except DataCorruptionError:
                         self.logger.debug("from worker receive cond Checksum mismatch. Data corrupted.")
                         client_socket.close()
                         return
+                    data_with_checksum = data_with_checksum[checksum_on*32+10+length:]
+                    try:
+                        self.map_result_buffer.put(received_data, timeout = 1)
+                    except queue.Full: # drop message
+                        continue
+                    time_now =  time.time() 
+                    # uptime = time_now- self.socket_start_time
+                    # uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
+                    #file.write(received_data)  # Write data to file
+                    cnt += 1
+                    self.logger.debug(f'worker_data integrity confirmed packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
+                    self.socket_last_run = time_now
+
             except ConnectionResetError as e:
                 # TO-DO graceful stop
                 client_socket.close()
@@ -683,23 +679,11 @@ class Socket_Producer_Side_Worker(Worker):
         length = len(serialized_data) 
         if length > 1e10:
             raise ValueError("send: data frame size cannot be greater thatn 1e10 bytes")
-        length = str(length).zfill(10).encode()
-        checksum = hashlib.md5(length + serialized_data).hexdigest()
-        #time.sleep(0.0005)
-        # Send data and checksum
-        cur_time = time.time()
         
-        time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
-        #print('send: cur_time ', cur_time, ", last_run ", last_run, ", length ", length)
-        if time_diff > 0:
-            self.logger.debug(f"Worker{self.id}.dispatch sleep for {time_diff}")
-            time.sleep(time_diff)
-        self.packet_cnt+=1
-        if self.client_socket is not None:
-            self.logger.debug(f"Worker{self.id}.dispatch sending serialied data")
-            self.client_socket.sendall(checksum.encode() + length + serialized_data)
-            self.logger.debug(f"Worker{self.id}.dispatch sent serialied data")
-        self.last_run = cur_time
+        self._send(client_socket = self.client_socket, 
+                   serialized_data = serialized_data, 
+                   checksum_on = self.checksum_on)
+        
 
 def config_aware_worker_factory(is_local, remote_info = None, 
                                 local_factory: object = Local_Thread_Producer_Sider_Worker,
@@ -903,9 +887,9 @@ class Task_Worker_Manager():
                  task_stale_timeout = 6,
                  management_port = 59842, 
                  logger = None,
+                 min_start_processing_length = None,
                  retry_watcher_on = False,
-                 data_ingress_type = 'socket',
-                 data_ingress_info = "localhost:41230"):
+                 ):
         if logger is None:
             logger = logging.getLogger('__file__')
         self.logger: logging.Logger = logger
@@ -918,6 +902,10 @@ class Task_Worker_Manager():
         self.task_stale_timeout = task_stale_timeout # float("inf")
         self.worker_sorter_factory = worker_sorter_factory
         self.retry_watcher_on = retry_watcher_on
+        if min_start_processing_length is not None:
+            self.min_start_processing_length = int(min_start_processing_length)
+        else:
+            self.min_start_processing_length = min_start_processing_length
         if worker_config is None:
             worker_config = []
         self.worker_config = worker_config
@@ -939,11 +927,8 @@ class Task_Worker_Manager():
         self.init_locks()
         self.management_port = management_port
         self.graceful_stopped = threading.Event()
-        self.th_input:threading.Thread = None
-        self.data_ingress_type = data_ingress_type
-        self.data_ingress_info = data_ingress_info
-        #self.init_manager(port=self.manager_port)
-        self.set_manage_httpd()
+        
+        
     def graceful_stop(self):
         self.stop_flag.set()
         self._worker_sorter.graceful_stop()
@@ -951,16 +936,7 @@ class Task_Worker_Manager():
         self.th_assign.join()
         self.th_clean_up.join()
         self.graceful_stopped.set()
-        if self.th_input is not None:
-            self.th_input.join()
-    
-    def on_input_data_received(self, data):
-        pass
-
-    def set_up_ingress_data(self):
-        if self.data_ingress_type == 'socket':
-            self.th_ingress = threading.Thread(target = self.on_input_data_received, args = [])
-            
+        
     def set_manage_httpd(self):
         mytaskworker = self
         class MyHandler(BaseHTTPRequestHandler):
@@ -1007,6 +983,7 @@ class Task_Worker_Manager():
                 dq.not_full.notify()
 
     def start(self):
+        self.set_manage_httpd()
         th = threading.Thread(target = self.assign_task, args = [], name='task work manager assign task')
         th.start()
         self.th_assign = th
@@ -1066,7 +1043,10 @@ class Task_Worker_Manager():
         # TO-DO, when full, eject latest, dispatch other worker
         """
         self.logger.debug("Task_manager.dispatch start")
-        task_id = str(uuid.uuid1())
+        if kwarg.get('task_id') is None:
+            task_id = str(uuid.uuid1())
+        else: 
+            task_id = kwarg.get('task_id')
         self.logger.debug("Task_manager.dispatch acquiring q_task_outstanding.mutex")
         try:
             self.q_task_outstanding.mutex.acquire(timeout=2)
@@ -1081,6 +1061,7 @@ class Task_Worker_Manager():
                 self.q_task_outstanding.not_full.wait(timeout=2)
             except Exception as e:
                 continue
+        self.logger.debug("q_task_outstanding not full")
         if self.stop_flag.is_set():
             self.q_task_outstanding.mutex.release()
             return False
@@ -1118,6 +1099,7 @@ class Task_Worker_Manager():
                     if self.stop_flag.is_set():
                         continue
                     if self.q_task_completed._qsize() >= self.output_minibatch_size:
+                        
                         self.logger.debug("Task_manager.on_task_complete waited minibatch")
                         cnt_fresh = 0
                         for i in range(self.output_minibatch_size):
@@ -1141,7 +1123,7 @@ class Task_Worker_Manager():
                                 output_minibatch[cnt_fresh] = completed
                                 cnt_fresh += 1
                                 self.logger.debug(f'fresh cnt {cnt_fresh}')
-                        
+                        self.logger.info(f'batch done {complete_count}')
                         self.send_output(output_minibatch[:cnt_fresh])
                         self.logger.debug(f'fresh cnt {cnt_fresh} sent')
                         output_minibatch = [()] * self.output_minibatch_size
@@ -1153,6 +1135,125 @@ class Task_Worker_Manager():
             except Exception as e:
                 print(e)
                 pass
+from types import MethodType
+from pytaskqml.task_worker import myclient, base_socket_worker, Stop_Signal
+from queue import Queue, Empty
+class Socket_Input_Task_Worker_Manager(Task_Worker_Manager):
+    def __init__(self, *args, data_ingress_type = 'socket',
+                 data_ingress_info = "localhost:41230", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.data_ingress_type = data_ingress_type
+        self.data_ingress_info = data_ingress_info
+        server_address = data_ingress_info.split(':')
+        self.server_address = (str(server_address[0]), int(server_address[1]))
+        self.client_dict: Dict[int, myclient] = {}
+        self.th_ingress: threading.Thread = None
+
+        self.ingress_lock_on = False
+         # since one is get the other put, the put side need no lock and can speed up
+        self.set_up_ingress_data()
+        self.handle_receive = MethodType(base_socket_worker.handle_receive, self)
+    @abstractmethod
+    def deserialise_parsed_input(self):
+        pass
+    @abstractmethod
+    def handle_receive(self):
+        pass
+    def set_up_ingress_data(self):
+        if self.data_ingress_type == 'socket':
+            self.th_ingress = threading.Thread(target = self.serve_socket_server, args = [])
+    
+    def graceful_stop(self):
+        
+        for client_id, client in self.client_dict.items():
+            client.stop_event.set()
+            
+        if self.th_ingress is not None:
+            self.th_ingress.join()
+        return super().graceful_stop()
+    def handle_workload(self, client:myclient):
+        cnt_dispatched = 0
+        while not client.stop_event.is_set():
+            self.logger.debug(f"client {client.id} handle_workload waiting get_parsed_data")
+            try:
+                parsed_data = client.received_parsed_queue.get(timeout = 1)
+            except Empty:
+                continue
+            # if client.received_parsed_queue.mutex.acquire(timeout = 1):
+            #     if len(client.received_parsed_queue.queue) <= 0:
+            #         while not client.stop_event.is_set():
+            #             if client.received_parsed_queue.not_empty.wait(timeout=1):
+            #                 break
+            #         if client.stop_event.is_set():
+            #             client.received_parsed_queue.mutex.release()
+            #             continue
+            #     self.logger.debug(f"client.received_parsed_queue not empty len = {len(client.received_parsed_queue.queue)}")
+            #     parsed_data = client.received_parsed_queue.get_nowait()
+            #     client.received_parsed_queue.mutex.release()
+            # else:
+            #     continue
+            if parsed_data is Stop_Signal: 
+                break
+            self.logger.debug(f"client {client.id} handle_workload get_parsed_data pre-dispatch")
+            self.dispatch(**self.deserialise_parsed_input(parsed_data))
+            cnt_dispatched += 1
+        self.logger.info("Socket Dispatcher leaving handle_workload")
+    def handle_socket(self,client: myclient):
+        self.logger.debug(f"client {client.id} handle_socket socket receive waiting")
+        client.th_recv = threading.Thread(target = self.handle_receive, args = [client], name = "handle_receive")
+        client.th_recv.start()
+        # loop process reopen socket
+        client.th_process = threading.Thread(target = self.handle_workload, args = [client], name = "handle_workload")
+        client.th_process.start()
+        # loop send
+        #client.th_send = threading.Thread(target = self.handle_send, args = [client], name = "handle_send")
+        #client.th_send.start()
+
+        client.th_recv.join()
+        client.th_process.join()
+        #client.th_send.join()
+        self.logger.debug(f"client {client.id} handle_socket client {client.id} exits")
+    
+    def serve_socket_server(self):
+        while not self.stop_flag.is_set():
+            
+            try:
+                self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                self.server_socket.bind(self.server_address)
+                self.logger.info("start socket server started")
+                
+            except:
+                self.server_socket.close()
+                continue
+            cnt_client_id = 0
+            self.server_socket.settimeout(1)
+            while not self.stop_flag.is_set():
+                try:
+                    self.server_socket.listen(1)
+
+                    # Accept a client connection
+                    client_socket, client_address = self.server_socket.accept()
+                    
+                    self.logger.info(f"start accepted client {client_address}")
+                    client_socket.settimeout(2)
+                    client = myclient(client_socket, id=cnt_client_id)
+                    self.client_dict[cnt_client_id] = client
+                    cnt_client_id += 1
+                    th = threading.Thread(target = self.handle_socket, args = [client])
+                    th.start()
+                except socket.timeout as te:
+                    # its ok
+                    pass
+                except Exception as e:
+                    self.logger.debug(traceback.format_exc())
+                    pass
+
+    def start(self):
+        
+        self.th_ingress.start()
+        
+        return super().start()
 from pprint import pprint
 def print_all_queues(my_task_worker_manager: Task_Worker_Manager = None):
     

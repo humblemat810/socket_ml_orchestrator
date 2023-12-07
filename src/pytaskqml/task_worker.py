@@ -26,7 +26,7 @@ import hashlib
 import numpy as np
 import time
 import threading
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 import time
 import logging
 from .utils.reconnecting_socket import ReconnectingSocket
@@ -46,7 +46,7 @@ class myclient():
     def __init__(self, client_socket, id, watchdog_timeout = 5):
         self.logger = logging.getLogger(f"server_ml_echo_worker-{port}")
         self.logger.debug('start loading module task_worker.py')
-        self.client_socket  = client_socket
+        self.client_socket: socket.socket  = client_socket
         self.stop_event : threading.Event = threading.Event()
         self.received_parsed_queue = Queue()
         self.send_queue = Queue()
@@ -63,6 +63,8 @@ class myclient():
         self.last_received = time.time()
         self.th_timeout_watchdog = threading.Thread(target = self.timeout_watcherdog, name = f"timeout watchdog {self.id}")
         #self.th_timeout_watchdog.start()
+    def close(self):
+        self.client_socket.close()
     def timeout_watcherdog(self):
         while not self.stop_event.is_set():
             time.sleep(self.watchdog_timeout)
@@ -77,11 +79,41 @@ class myclient():
         self.handle_wkld_exiting.wait()
         self.handle_send_exiting.wait()
 from typing import Dict
+class DataIngressIncomplete(BaseException):
+    pass
+class DataCorruptionError(BaseException):
+    pass
+def parse_data(data_with_checksum: bytes, checksum_on: bool):
+    if checksum_on:
+        hash_algo = hashlib.md5()
+        checksum = data_with_checksum[:32].decode()
+        length = data_with_checksum[32:42]
+        if len(data_with_checksum) < int(length) + 42:
+            raise(DataIngressIncomplete('more data to come')) # wait for more data to come
+        hash_algo.update(length)
+        length = int(data_with_checksum[32:42].decode())
+        received_data = data_with_checksum[42:42+length]
+        hash_algo.update(received_data)
+        calculated_checksum = hash_algo.hexdigest()
+        
+        if checksum == calculated_checksum:
+            #self.logger.debug(f"client {client.id} handle_receive data correct")
+            pass
+        else:
+            raise(DataCorruptionError('data corrupt'))
+    else:
+        length = int(data_with_checksum[checksum_on*32:checksum_on*32+10])
+        if len(data_with_checksum) < int(length) + checksum_on*32+10:
+            raise DataIngressIncomplete('more data to come') # wait_for_more_data to come
+        received_data = data_with_checksum[checksum_on*32+10:checksum_on*32+10+length]
+        calculated_checksum = ""
+    return length, received_data, calculated_checksum
 class base_socket_worker(base_worker):
     def __init__(self, server_address = ('localhost', 5000),
                  min_time_lapse_ns = 10000,
                  management_port=18464,
                  min_start_processing_length = None,
+                 checksum_on=False,
                  *arg, **kwarg):
         self.logger = logging.getLogger(f"server_ml_echo_worker-{port}")
         self.server_address = server_address
@@ -92,30 +124,35 @@ class base_socket_worker(base_worker):
         self.client_dict: Dict[int, myclient] = {}
         self.graceful_stop_done = threading.Event()
         self.management_port = management_port
-        self.min_start_processing_length = min_start_processing_length # 115757000
+        self.ingress_lock_on = True  # maybe can set false if only 1 ingress
+        self.min_start_processing_length = int(min_start_processing_length)
+        self.checksum_on = checksum_on
         #import signal
         #signal.signal(signal.SIGINT, self.graceful_stop)
         #self.received_parsed_queue = Queue()
 
         
-    def _send(self, client_socket, serialized_data):
-        
-        
+    def _send(self, client_socket: socket.socket, serialized_data: str, checksum_on: bool = False):
         length = len(serialized_data)
-        hash_algo = hashlib.md5()
         length = str(length).zfill(10).encode()
-        hash_algo.update(length)
-        hash_algo.update(serialized_data)
-        calculated_checksum = hash_algo.hexdigest()
         cur_time = time.time()
-        time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
-        
-        if time_diff > 0:
-            time.sleep(time_diff)
-        client_socket.sendall(calculated_checksum.encode() + length + serialized_data)
+        if checksum_on:
+            hash_algo = hashlib.md5()
+            hash_algo.update(length)
+            hash_algo.update(serialized_data)
+            calculated_checksum = hash_algo.hexdigest()
+            
+            time_diff = self.min_time_lapse_ns / 1e9 - cur_time + self.last_run
+            
+            if time_diff > 0:
+                time.sleep(time_diff)
+            checksum = calculated_checksum.encode()
+        else:
+            checksum = "".encode()
+        client_socket.sendall(checksum + length + serialized_data)
         self.logger.info('succeed')
         self.last_run = cur_time
-        
+    
     
     def send(self,client: myclient, data):
         client.send_queue.put(data)
@@ -197,7 +234,7 @@ class base_socket_worker(base_worker):
         list(map(lambda x : x.join() ,stop_ths))      
         self.graceful_stop_done.set()
         return True
-    def handle_receive(self, client: myclient):
+    def handle_receive(self, client: myclient, checksum_on = False):
         # wait on socket receive lock
         self.logger.debug(f"client {client.id} handle_receive start")
         data_with_checksum = bytes()
@@ -223,65 +260,66 @@ class base_socket_worker(base_worker):
                 self.logger.debug(f"client {client.id} handle_receive socket received len{len(data_with_checksum)}")
                 client.last_received = time.time()
                 #print(f"receive non cond: {len(data_with_checksum)}")
-                while not client.stop_event.is_set() and len(data_with_checksum) >= max(42, self.min_start_processing_length):
+                while not client.stop_event.is_set() and len(data_with_checksum) >= max(checksum_on*32+10, self.min_start_processing_length):
                     self.logger.info('receive')
                     #print(f"receive cond: {len(data_with_checksum)}")
                     self.logger.debug(f"client {client.id} handle_receive checking data integrity")
-                    hash_algo = hashlib.md5()
                     
-                    checksum = data_with_checksum[:32].decode()
-                    length = data_with_checksum[32:42]
-                    if len(data_with_checksum) < int(length) + 42:
-                        break # wait for more data to come
-                    hash_algo.update(length)
-                    length = int(data_with_checksum[32:42].decode())
-                    received_data = data_with_checksum[42:42+length]
-                    hash_algo.update(received_data)
-                    calculated_checksum = hash_algo.hexdigest()
-                    
-                    if checksum == calculated_checksum:
-                        self.logger.debug(f"client {client.id} handle_receive data correct")
-                        data_with_checksum = data_with_checksum[42+length:]
-                        try:
-                            client.received_parsed_queue.put(received_data, timeout = 1)
-                        except:
-                            continue
+                    try:
+                        length, received_data, calculated_checksum = parse_data(data_with_checksum, checksum_on= self.checksum_on)
                         time_now =  time.time() 
-                        uptime = time_now- self.socket_start_time
-                        uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
-                        #file.write(received_data)  # Write data to file
-                        cnt += 1
-                        logging.info(f'uptime: {uptime_str}, correct packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
-                        socket_last_run = time_now
-                    else:
-                        logging.info("receive cond Checksum mismatch. Data corrupted.")
-                        client.close()
+                        
+                    except DataIngressIncomplete as e:
                         break
+                    except DataCorruptionError:
+                        self.logger.debug("from dispatcher receive cond Checksum mismatch. Data corrupted. Close connection will handshake again")
+                        client.client_socket.close()
+                        break
+                    data_with_checksum = data_with_checksum[checksum_on*32+10+length:]
+                    while not client.stop_event.is_set():
+                        try:
+                            if self.ingress_lock_on:
+                                client.received_parsed_queue.put(received_data, timeout = 1)
+                            else:
+                                client.received_parsed_queue._put(received_data)
+                            break
+                        except Full:
+                            continue
+                    if client.stop_event.is_set():
+                        continue
+                    #file.write(received_data)  # Write data to file
+                    cnt += 1
+                    uptime = time_now- self.socket_start_time
+                    uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
+                    logging.info(f'uptime: {uptime_str}, correct packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
+                    
+                    socket_last_run = time_now
+                
             except ConnectionResetError as e:
                 # TO-DO graceful stop
-                self.logger.debug(traceback.format_exc())
+                self.logger.debug(traceback.print_exc())
                 client.client_socket.close()
                 client.stop_event.set()
                 break
             except UnicodeDecodeError as e:
-                self.logger.debug(traceback.format_exc())
+                self.logger.debug(traceback.print_exc())
                 client.client_socket.close()
                 client.stop_event.set()
                 break
             except OSError as e:
-                self.logger.debug(traceback.format_exc())
+                self.logger.debug(traceback.print_exc())
                 client.client_socket.close()
                 client.stop_event.set()
                 break
             except ConnectionAbortedError as e:
-                self.logger.debug(traceback.format_exc())
+                self.logger.debug(traceback.print_exc())
                 client.send_queue._put(Stop_Signal)
                 client.stop_event.set()
                 client.close()
                 break
             except Exception as e:
-                self.logger.debug(traceback.format_exc())
-                traceback.print_exc(e)
+                self.logger.debug(traceback.print_exc())
+                traceback.print_exc()
                 client.stop_event.set()
                 client.client_socket.close()
                 break
@@ -361,9 +399,6 @@ class base_socket_worker(base_worker):
                 try:
                     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-            # Bind the socket to a specific address and port
-                    if self.server_address:
-                        self.server_address = self.server_address
                     self.server_socket.bind(self.server_address)
                     self.logger.info("start socket server started")
                     
@@ -383,9 +418,11 @@ class base_socket_worker(base_worker):
                         client_socket.settimeout(2)
                         client = myclient(client_socket, id=cnt_client_id)
                         self.client_dict[cnt_client_id] = client
-                        cnt_client_id += 1
-                        th = threading.Thread(target = self.handle_socket, args = [client])
+                        
+                        th = threading.Thread(target = self.handle_socket, 
+                                              args = [client], name = f'client{cnt_client_id} handle socket')
                         th.start()
+                        cnt_client_id += 1
                     except socket.timeout as te:
                         # its ok
                         pass
