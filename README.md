@@ -3,6 +3,12 @@
 socket supported orchestrator using fast socket transfer data between orchestrator and worker designed for Machine learning workload
 ### Work on stackless python, pypy, and cpython, windows and Xnux
 
+SEO keywords: Windows-Celery, Task queue, TASKQML, 
+
+[Installation](README.md#installation)
+
+[Benchmark](README.md#Benchmark)
+
 # Design Background/ Overview: 
 Machine learning projects often use python and currenctly it lacks a python native solution to stream realtime speedy output for small to medium scale solutions
 
@@ -87,3 +93,14 @@ To dos
  1. Framework for the task queuer to work on task directly if it has capacity.
  2. More test cases such as gpu workload tests
 
+<a id="installation"></a>
+# Installation
+
+Plain use of the taskqml requires no additional dependency other than the python itself.
+An empty requirements.txt is provided.
+
+But to develop and to run the examples, other dependencies are used as an illustration. Also, to run a simple benchmark against Celery, celery itself will be required.
+
+The demo environment would require the demo to be run alone with the pytaskqml separately installed.
+
+The development requires developing and testing the demo. So it is recommended to install pytaskqml in editable mode using pip install -e \<pytaskml root\>
