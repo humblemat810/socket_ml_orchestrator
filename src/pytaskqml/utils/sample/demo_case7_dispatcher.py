@@ -135,8 +135,10 @@ def main():
             last_run = now_time
             
             
-            
+        
         client_socket.retry_enabled = False
+        client_socket.close()
+        print('demo socket disabled retry, closed')
     th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
     while not my_task_worker_manager.stop_flag.is_set():

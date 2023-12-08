@@ -1,5 +1,7 @@
+
 # socket_ml_orchestrator
 socket supported orchestrator using fast socket transfer data between orchestrator and worker designed for Machine learning workload
+### Work on stackless python, pypy, and cpython, windows and Xnux
 
 # Design Background/ Overview: 
 Machine learning projects often use python and currenctly it lacks a python native solution to stream realtime speedy output for small to medium scale solutions
@@ -84,3 +86,4 @@ For this particular test case, pytaskqml outruns celery.
 To dos  
  1. Framework for the task queuer to work on task directly if it has capacity.
  2. More test cases such as gpu workload tests
+
