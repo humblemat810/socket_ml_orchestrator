@@ -1090,8 +1090,13 @@ class Task_Worker_Manager():
             self.logger.debug(f"task {completed_task[0]} complete")
         return False
     def output_minibatch(self, mini_batch_to_process):
-        
-        output_minibatch = [completed for completed in mini_batch_to_process if self.check_task_stale(completed) == False]
+        output_minibatch = [()] * len(mini_batch_to_process)
+        i_cnt_fresh = 0
+        for completed in mini_batch_to_process:
+            if self.check_task_stale(completed) == False:
+                output_minibatch[i_cnt_fresh] = completed
+                i_cnt_fresh += 1
+        output_minibatch = output_minibatch[:i_cnt_fresh]
         cnt_fresh = len(output_minibatch)
         self.complete_count += cnt_fresh
         self.logger.debug(f'fresh cnt {cnt_fresh}')
@@ -1111,7 +1116,9 @@ class Task_Worker_Manager():
                     continue
                 if self.q_task_completed._qsize() >= self.output_minibatch_size:
                     self.logger.debug("Task_manager.on_task_complete waited minibatch")
-                    mini_batch_to_process = [self.q_task_completed._get() for i in range(self.output_minibatch_size)]
+                    mini_batch_to_process = [()] * self.output_minibatch_size
+                    for i in range(self.output_minibatch_size):
+                        mini_batch_to_process[i] = self.q_task_completed._get()
                     self.q_task_completed.not_full.notify()
                     if self.q_task_completed._qsize() > 0:
                         self.q_task_completed.not_empty.notify()
