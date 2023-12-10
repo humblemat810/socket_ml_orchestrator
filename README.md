@@ -5,10 +5,13 @@ socket supported orchestrator using fast socket transfer data between orchestrat
 
 SEO keywords: Windows-Celery, Task queue, TASKQML, 
 
-[Installation](README.md#installation)
+[Design Background/ Overview](#overview)
 
-[Benchmark](README.md#Benchmark)
+[Benchmark](#benchmark)
 
+[Installation](#installation)
+
+<a id="overview"></a>
 # Design Background/ Overview: 
 Machine learning projects often use python and currenctly it lacks a python native solution to stream realtime speedy output for small to medium scale solutions
 
@@ -40,23 +43,32 @@ The current framework / inheritance tree is as follows:
 
 A simple self shutdown simplehttpd is used to shutdown the worker just in case, using the route /shutdown
 
-# Benchmarking
+<a id="benchmark"></a>
+# Benchmarking Data
 
 A random word count test case is made. Each word is sent to the worker and a counter has to be returned
 However, celery convert the results into json and it cannot serialise custom objects. So to make the comparison fair, the returned dict is converted into counter before adding.
 
 
-Against celery:
-using 7 workers on pytaskqml the results are:
-##
-banana 904  
-apple 950  
-orange 967  
-grape 929  
-kiwi 947  
-cherry 933  
 
-and using celery results are:
+using 7 workers on pytaskqml the results are (demo_case3_n_workers.py):
+##
+kiwi 1144
+banana 1169
+cherry 1159
+grape 1185
+orange 1136
+apple 1166,
+
+no profiler
+grape 1357
+kiwi 1368
+banana 1462
+apple 1409
+cherry 1356
+orange 1417
+Against celery:
+and using celery results are: (celery_redis_word_count.py, celery_task_create.py)
 ##
 grape 722  
 apple 701  
@@ -65,28 +77,63 @@ kiwi 728
 banana 709  
 orange 722  
 
-Moring, with a bit trial and error, using 2 in memory local thread worker
-plus 2 socket worker, the so far best result is 3 times the redis celery result
-
+Moring, with a bit trial and error, using 2 in proc local thread worker
+plus 2 socket worker, the result is 3 times the redis celery result
+(demo_case6_mixed_worker_no_profile.py)
 
 ##
-orange 1804  
-apple 1766  
-cherry 1798  
-banana 1872  
-kiwi 1833  
-grape 1911  
+banana 2048 
+cherry 1964 
+orange 1978 
+kiwi 1987 
+grape 2087 
+apple 2005 
+
+When yappi is turned on (demo_case5_mixed_worker_type.py)
+the results become:
+grape 1621 
+cherry 1680 
+kiwi 1688 
+apple 1639 
+banana 1599 
+orange 1639 
 
 Interestingly, using only local worker with 7 workers,
-the result is much worse:
+the result is much worse with yappi profiler on: (demo_case4_local_worker_only.py)
 
 ##
-kiwi 409  
-grape 382  
-cherry 410  
-orange 375  
-banana 396  
-apple 380  
+grape 901 
+apple 942 
+cherry 930 
+kiwi 920 
+banana 922 
+orange 905 
+
+however, with yappi profiler on: 
+
+apple 1997 
+kiwi 2067 
+orange 2014 
+grape 2000 
+banana 2046 
+cherry 2027 
+
+With input using socket receive instead of direct insert into the queue, the speed is a bit slower
+
+kiwi 1670 
+banana 1674 
+orange 1630 
+grape 1736 
+cherry 1651 
+apple 1727 
+
+and again, speed increases with profiler off 
+
+cherry 1739 
+grape 1741 
+apple 1784 
+banana 1754 
+orange 1732 
 
 For this particular test case, pytaskqml outruns celery.
 To dos  
@@ -94,12 +141,17 @@ To dos
  2. More test cases such as gpu workload tests
 
 <a id="installation"></a>
+
 # Installation
 
 Plain use of the taskqml requires no additional dependency other than the python itself.
 An empty requirements.txt is provided.
 
+```pip install -r dev_requirements.txt```
+
 But to develop and to run the examples, other dependencies are used as an illustration. Also, to run a simple benchmark against Celery, celery itself will be required.
+
+```pip install -r demo-requirements.txt```
 
 The demo environment would require the demo to be run alone with the pytaskqml separately installed.
 

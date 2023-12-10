@@ -77,7 +77,8 @@ def shutdown(dispatcher_worker_config):
         th.start()
     for th in shutdown_ths:
         th.join()
-def start_processes(dispatcher_worker_config):
+from typing import List
+def start_processes(dispatcher_worker_config: List):
     n_worker = len(dispatcher_worker_config)
     import pathlib
     from typing import List
@@ -95,7 +96,7 @@ def start_processes(dispatcher_worker_config):
         for p in processes:
             p.start()
 def main(dispatcher_worker_config):
-    start_processes(dispatcher_worker_config)
+    start_processes(dispatcher_worker_config,)
     import time
     time.sleep(13)
     shutdown(dispatcher_worker_config)
