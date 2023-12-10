@@ -1103,19 +1103,19 @@ class Task_Worker_Manager():
         #function that operate on task completed
         self.logger.debug("Task_manageron.on_task_complete start")
         while not self.stop_flag.is_set():
-            try:
-                self.logger.debug("Task_manager.on_task_complete start waiting for minibatch")
-                with self.q_task_completed.not_empty:
-                    q_cond_wait(self, self.q_task_completed, self.output_minibatch_size)
-                    if self.stop_flag.is_set():
-                        continue
-                    if self.q_task_completed._qsize() >= self.output_minibatch_size:
-                        self.logger.debug("Task_manager.on_task_complete waited minibatch")
-                        mini_batch_to_process = [self.q_task_completed._get() for i in range(self.output_minibatch_size)]
-                        self.q_task_completed.not_full.notify()
-                        if self.q_task_completed._qsize() > 0:
-                            self.q_task_completed.not_empty.notify()
-                output_minibatch = self.output_minibatch(mini_batch_to_process)
+            
+            self.logger.debug("Task_manager.on_task_complete start waiting for minibatch")
+            with self.q_task_completed.not_empty:
+                q_cond_wait(self, self.q_task_completed, self.output_minibatch_size)
+                if self.stop_flag.is_set():
+                    continue
+                if self.q_task_completed._qsize() >= self.output_minibatch_size:
+                    self.logger.debug("Task_manager.on_task_complete waited minibatch")
+                    mini_batch_to_process = [self.q_task_completed._get() for i in range(self.output_minibatch_size)]
+                    self.q_task_completed.not_full.notify()
+                    if self.q_task_completed._qsize() > 0:
+                        self.q_task_completed.not_empty.notify()
+            output_minibatch = self.output_minibatch(mini_batch_to_process)
                 
 from types import MethodType
 from pytaskqml.task_worker import myclient, base_socket_worker, Stop_Signal
