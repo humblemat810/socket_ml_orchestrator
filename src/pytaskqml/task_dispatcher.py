@@ -1,4 +1,4 @@
-
+from pytaskqml.utils.reconnecting_socket import ReconnectingSocket
 import traceback
 import logging
 class MyNullHandler(logging.Handler):
@@ -576,9 +576,7 @@ class Socket_Producer_Side_Worker(Worker):
                     continue
                 data_with_checksum = data_with_checksum + data
                 self.logger.debug('worker data received')
-                #print(f"receive non cond: {len(data_with_checksum)}")
                 while not self.stop_flag.is_set() and (len(data_with_checksum) >= self.min_start_processing_length):
-                    #print(f"receive cond: {len(data_with_checksum)}")
                     try:
                         length, received_data, calculated_checksum = parse_data(data_with_checksum, checksum_on=checksum_on)
                     except DataIngressIncomplete as e:
@@ -593,9 +591,6 @@ class Socket_Producer_Side_Worker(Worker):
                     except queue.Full: # drop message
                         continue
                     time_now =  time.time() 
-                    # uptime = time_now- self.socket_start_time
-                    # uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
-                    #file.write(received_data)  # Write data to file
                     cnt += 1
                     self.logger.debug(f'worker_data integrity confirmed packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
                     self.socket_last_run = time_now
@@ -868,6 +863,17 @@ class Worker_Sorter():
             self.th_retry_watch.join()
             self.logger.info(f'retry watch stopped')
         self.graceful_stopped.set()
+def q_cond_wait(self: "Task_Worker_Manager", queue: queue.Queue, max_size: int):
+    while not self.stop_flag.is_set() and (queue._qsize() < max_size):
+                        
+        self.logger.debug("Task_manager.on_task_complete wait more record for minibatch")
+        try:
+            self.q_task_completed.not_empty.wait(timeout = 2)
+        except Exception as e:
+            self.logger.debug(f"Task_manager.on_task_complete empty_waited_count={self.empty_waited_count}")
+            continue
+        self.empty_waited_count += 1
+        self.logger.debug(f"Task_manager.on_task_complete q size={self.q_task_completed._qsize()}")
         
 class Task_Worker_Manager():
     """
@@ -897,7 +903,7 @@ class Task_Worker_Manager():
             self.n_worker = len(worker_config)
         self.assign_task_called = 0 
         self.max_outstanding = 100
-        self.output_minibatch_size = output_minibatch_size
+        
         self.task_retry_timeout = task_retry_timeout  #float("inf")
         self.task_stale_timeout = task_stale_timeout # float("inf")
         self.worker_sorter_factory = worker_sorter_factory
@@ -927,8 +933,9 @@ class Task_Worker_Manager():
         self.init_locks()
         self.management_port = management_port
         self.graceful_stopped = threading.Event()
-        
-        
+        self.empty_waited_count : int = 0 # stat counter for output wait
+        self.output_minibatch_size = output_minibatch_size
+        self.complete_count = 0
     def graceful_stop(self):
         self.stop_flag.set()
         self._worker_sorter.graceful_stop()
@@ -1074,67 +1081,42 @@ class Task_Worker_Manager():
         self.q_task_outstanding.mutex.release()
     def print_all_queues(self):
         print_all_queues(self)
+    def check_task_stale(self, completed_task):
+        task_time = completed_task[0]
+        if time.time() - task_time[0] > self.task_stale_timeout:
+            self.logger.debug(f"task {completed_task[0]} stale")
+            return True
+        else:
+            self.logger.debug(f"task {completed_task[0]} complete")
+        return False
+    def output_minibatch(self, mini_batch_to_process):
+        
+        output_minibatch = [completed for completed in mini_batch_to_process if self.check_task_stale(completed) == False]
+        cnt_fresh = len(output_minibatch)
+        self.complete_count += cnt_fresh
+        self.logger.debug(f'fresh cnt {cnt_fresh}')
+        self.logger.info(f'batch done {self.complete_count}')
+        self.send_output(output_minibatch[:cnt_fresh])
+        self.logger.debug(f'fresh cnt {cnt_fresh} sent')
+        return output_minibatch
     def on_task_complete(self):
         #function that operate on task completed
         self.logger.debug("Task_manageron.on_task_complete start")
-        output_minibatch = [()] * self.output_minibatch_size
-        complete_count = 0
-        empty_waited_count = 0
         while not self.stop_flag.is_set():
-            
             try:
                 self.logger.debug("Task_manager.on_task_complete start waiting for minibatch")
                 with self.q_task_completed.not_empty:
-                    while not self.stop_flag.is_set() and (self.q_task_completed._qsize() < self.output_minibatch_size):
-                        
-                        self.logger.debug("Task_manager.on_task_complete wait more record for minibatch")
-                        try:
-                            self.q_task_completed.not_empty.wait(timeout = 2)
-                        except Exception as e:
-                            self.logger.debug(f"Task_manager.on_task_complete empty_waited_count={empty_waited_count}")
-                            continue
-                        empty_waited_count += 1
-                        self.logger.debug(f"Task_manager.on_task_complete q size={self.q_task_completed._qsize()}")
-                        
+                    q_cond_wait(self, self.q_task_completed, self.output_minibatch_size)
                     if self.stop_flag.is_set():
                         continue
                     if self.q_task_completed._qsize() >= self.output_minibatch_size:
-                        
                         self.logger.debug("Task_manager.on_task_complete waited minibatch")
-                        cnt_fresh = 0
-                        for i in range(self.output_minibatch_size):
-                            self.logger.debug(f'Task_manager.on_task_complete minibatch record {i}')
-                            completed = self.q_task_completed._get()
-                            self.q_task_completed.not_full.notify()
-                            if self.q_task_completed._qsize() > 0:
-                                self.q_task_completed.not_empty.notify()
-                            task_time = completed[0]
-                            if time.time() - task_time[0] > self.task_stale_timeout:
-                                self.logger.debug(f"task {completed[0]} stale")
-                                continue
-                            else:
-                                self.logger.debug(f"task {completed[0]} complete")
-                            complete_count += 1
-                            self.logger.debug(f'complete cnt {complete_count}')
-                            
-                            if completed[0][0] > self.watermark-self.water_mark_lookback:
-                                
-                                self.watermark = completed[0][0]
-                                output_minibatch[cnt_fresh] = completed
-                                cnt_fresh += 1
-                                self.logger.debug(f'fresh cnt {cnt_fresh}')
-                        self.logger.info(f'batch done {complete_count}')
-                        self.send_output(output_minibatch[:cnt_fresh])
-                        self.logger.debug(f'fresh cnt {cnt_fresh} sent')
-                        output_minibatch = [()] * self.output_minibatch_size
-                            
-                    # if self.task_retry_timeout == float('inf'):
-                    #     time.sleep(1)
-                    # else:
-                    #     time.sleep(max(0.1, self.task_retry_timeout/10))
-            except Exception as e:
-                print(e)
-                pass
+                        mini_batch_to_process = [self.q_task_completed._get() for i in range(self.output_minibatch_size)]
+                        self.q_task_completed.not_full.notify()
+                        if self.q_task_completed._qsize() > 0:
+                            self.q_task_completed.not_empty.notify()
+                output_minibatch = self.output_minibatch(mini_batch_to_process)
+                
 from types import MethodType
 from pytaskqml.task_worker import myclient, base_socket_worker, Stop_Signal
 from queue import Queue, Empty
@@ -1275,7 +1257,3 @@ def print_all_queues(my_task_worker_manager: Task_Worker_Manager = None):
         print("dispatched_task_limit", w.dispatched_task_limit)
         print("dispatched_task", len(w.queue_dispatched.queue))
         pprint(w.queue_dispatched.queue)
-
-from pytaskqml.utils.reconnecting_socket import ReconnectingSocket
-import hashlib
-
