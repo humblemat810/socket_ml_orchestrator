@@ -1242,6 +1242,8 @@ class Socket_Input_Task_Worker_Manager(Task_Worker_Manager):
                     cnt_client_id += 1
                     th = threading.Thread(target = self.handle_socket, args = [client])
                     th.start()
+                    self.logger.info(f'dispatcher added client {cnt_client_id}')
+                    print(f'dispatcher added client {cnt_client_id}')
                 except socket.timeout as te:
                     # its ok
                     pass

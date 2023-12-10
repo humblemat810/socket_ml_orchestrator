@@ -23,7 +23,7 @@ logging.getLogger().addHandler(null_handler)
 
 import socket
 import hashlib
-import numpy as np
+
 import time
 import threading
 from queue import Queue, Empty, Full

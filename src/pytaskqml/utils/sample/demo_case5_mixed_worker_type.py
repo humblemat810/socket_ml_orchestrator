@@ -25,7 +25,8 @@ def run_worker(i_worker = 0):
     args_file1 = ["python",'yappi_main_wrapper.py', 
                   #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
                   r"demo_case1_wordcount_worker.main", f"worker{12345+i_worker}", "--port", str(12345 + i_worker), "--management-port", str(22345+0), "--config", 'worker.ini']
-    subprocess.call(args_file1)
+    p = subprocess.call(args_file1)
+    print(f'worker {i_worker} subprocess done with return code {p}')
 
 def run_dispatcher(n_worker):
     # Define the arguments for the second Python file
@@ -33,7 +34,8 @@ def run_dispatcher(n_worker):
                   #'-o', str((pathlib.Path(".")/'dispatcher.ystat').resolve()), 
                   r"demo_case4_dispatcher.main", 'dispatcher',"--management-port", "18000", "--config", 'dispatcher_case5.ini', '--n-worker', f"{n_worker}"]
     subprocess.call(args_file2)
-
+    p = subprocess.call(args_file2)
+    print(f'dispatcher with {n_worker} workers done with return code {p}')
 import os
 
 class ChangeDirectory:
@@ -51,19 +53,27 @@ def shutdown(dispatcher_worker_config):
     import threading
     from pytaskqml.utils.management import shutdown_url_request
     def shutdown_server():
-        return shutdown_url_request('http://localhost:18000/shutdown')
-    def shutdown_worker(i_worker):
-        return shutdown_url_request(f'http://localhost:{22345+i_worker}/shutdown')
-        
+        response = shutdown_url_request('http://localhost:18000/shutdown')
+        print("dispatcher", 'response', response)
+        return response
+    def shutdown_worker(i_worker, i_remote_worker):
+        print(f"shutting down {i_remote_worker}th remote worker", i_worker)
+        response = shutdown_url_request(f'http://localhost:{22345+i_remote_worker}/shutdown')
+        print(f"{i_worker} worker, {i_remote_worker} remote worker", 'response', response)
+        return response
     threading.Thread(target = shutdown_server).start() # worker
     from typing import List
     shutdown_ths: List[threading.Thread] = []
-    for i, worker_config in enumerate((dispatcher_worker_config)):
+    remote_worker_cnt = 0
+    for i_worker, worker_config in enumerate((dispatcher_worker_config)):
         if worker_config['location'] == 'local':
             pass
         else:
             # shutdown remote worker
-            shutdown_ths.append(threading.Thread(target = shutdown_worker, args = [i], name = f'shutdown worker {i}'))
+            shutdown_ths.append(threading.Thread(target = shutdown_worker, 
+                                                 args = [i_worker, remote_worker_cnt], 
+                                                 name = f'shutdown worker {i_worker}'))
+            remote_worker_cnt += 1
     shutdown_ths.append(threading.Thread(target = shutdown_server, name = 'shutdown server'))
     for th in shutdown_ths:
         th.start()
@@ -71,9 +81,10 @@ def shutdown(dispatcher_worker_config):
         th.join()
 def start_processes(dispatcher_worker_config):
     n_worker = len(dispatcher_worker_config)
-    import os, pathlib
+    import pathlib
+    from typing import List
     with ChangeDirectory(str(pathlib.Path(__file__).parent)):
-        processes = []
+        processes:List[multiprocessing.Process]  = []
         remote_worker_cnt = 0
         for i, worker_config in enumerate((dispatcher_worker_config)):
             if worker_config['location'] == 'local':

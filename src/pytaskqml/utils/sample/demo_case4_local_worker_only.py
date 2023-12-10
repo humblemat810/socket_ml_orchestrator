@@ -51,29 +51,39 @@ def shutdown(dispatcher_worker_config):
     import threading
     from pytaskqml.utils.management import shutdown_url_request
     def shutdown_server():
-        return shutdown_url_request('http://localhost:18000/shutdown')
-    def shutdown_worker(i_worker):
-        return shutdown_url_request(f'http://localhost:{22345+i_worker}/shutdown')
-        
+        response = shutdown_url_request('http://localhost:18000/shutdown')
+        print("dispatcher", 'response', response)
+        return response
+    def shutdown_worker(i_worker, i_remote_worker):
+        print(f"shutting down {i_remote_worker}th remote worker", i_worker)
+        response = shutdown_url_request(f'http://localhost:{22345+i_remote_worker}/shutdown')
+        print(f"{i_worker} worker, {i_remote_worker} remote worker", 'response', response)
+        return response
     threading.Thread(target = shutdown_server).start() # worker
     from typing import List
     shutdown_ths: List[threading.Thread] = []
-    for i, worker_config in enumerate((dispatcher_worker_config)):
+    remote_worker_cnt = 0
+    for i_worker, worker_config in enumerate((dispatcher_worker_config)):
         if worker_config['location'] == 'local':
             pass
         else:
             # shutdown remote worker
-            shutdown_ths.append(threading.Thread(target = shutdown_worker, args = [i], name = f'shutdown worker {i}'))
+            shutdown_ths.append(threading.Thread(target = shutdown_worker, 
+                                                 args = [i_worker, remote_worker_cnt], 
+                                                 name = f'shutdown worker {i_worker}'))
+            remote_worker_cnt += 1
     shutdown_ths.append(threading.Thread(target = shutdown_server, name = 'shutdown server'))
     for th in shutdown_ths:
         th.start()
     for th in shutdown_ths:
         th.join()
-def start_processes(dispatcher_worker_config):
+from typing import List
+def start_processes(dispatcher_worker_config: List):
     n_worker = len(dispatcher_worker_config)
-    import os, pathlib
+    import pathlib
+    from typing import List
     with ChangeDirectory(str(pathlib.Path(__file__).parent)):
-        processes = []
+        processes:List[multiprocessing.Process]  = []
         remote_worker_cnt = 0
         for i, worker_config in enumerate((dispatcher_worker_config)):
             if worker_config['location'] == 'local':
@@ -86,7 +96,7 @@ def start_processes(dispatcher_worker_config):
         for p in processes:
             p.start()
 def main(dispatcher_worker_config):
-    start_processes(dispatcher_worker_config)
+    start_processes(dispatcher_worker_config,)
     import time
     time.sleep(13)
     shutdown(dispatcher_worker_config)
