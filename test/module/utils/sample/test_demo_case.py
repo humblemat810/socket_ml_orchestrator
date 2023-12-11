@@ -27,4 +27,8 @@ class TestMyClass:
         from pytaskqml.utils.sample.demo_case1_main import main
         main()
         
+    def test_end_to_end_demo_case2(self):
+        from pytaskqml.utils.sample.demo_case2_main import main
+        main()
+        
 

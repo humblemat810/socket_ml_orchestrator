@@ -381,9 +381,10 @@ class Worker(ABC):
                     self.logger.debug(f"Worker{self.id}.add_task2 leaving")
 
 class Local_Thread_Producer_Sider_Worker(Worker):
-    def __init__(self, is_local, *arg, **kwarg):
-        super().__init__( *arg, **kwarg)
-        self.is_local = is_local
+    def __init__(self, *arg, is_local = True, **kwarg):
+        self.is_local = True
+        super().__init__( *arg, is_local = self.is_local, **kwarg)
+        
         # self.client_socket = None not needed
         self.stop_flag = threading.Event()
         self.last_run = None
@@ -525,13 +526,14 @@ from types import MethodType
 class Socket_Producer_Side_Worker(Worker):
     def init_socket(self):
         pass
-    def __init__(self, is_local, remote_info, *arg, **kwarg):
-        super().__init__(*arg, **kwarg)
+    def __init__(self,  remote_info, *arg, is_local = False,  **kwarg):
+        self.is_local = False
+        super().__init__(*arg, is_local = self.is_local, **kwarg)
         self.uuid_to_time = {}
         self.min_time_lapse_ns = 10000
         self.packet_cnt = 0
         self.last_run = time.time() - self.min_time_lapse_ns/ 1e9
-        self.is_local = is_local
+        
         self.auto_call_reduce = False
         self.stop_flag = threading.Event()
         self.socket_last_run = None
@@ -685,9 +687,9 @@ def config_aware_worker_factory(is_local, remote_info = None,
     if not (bool(is_local) ^ bool(remote_info)):
         raise ValueError('is_local is True then cnanot specify remote_info')
     if is_local:
-        return local_factory(is_local, *arg, **kwarg)
+        return local_factory(*arg, is_local = is_local, **kwarg)
     else:
-        return remote_factory(is_local, remote_info, *arg, **kwarg)
+        return remote_factory( *arg, is_local = is_local, remote_info = remote_info, **kwarg)
               
 class Worker_Sorter():
     """
