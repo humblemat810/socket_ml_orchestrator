@@ -874,7 +874,14 @@ def q_cond_wait(self: "Task_Worker_Manager", queue: queue.Queue, max_size: int):
             continue
         self.empty_waited_count += 1
         self.logger.debug(f"Task_manager.on_task_complete q size={self.q_task_completed._qsize()}")
-        
+class worker_config():
+    def __init__(self, *arg, **kwarg):
+        self.min_start_processing_length: int
+        self.location: str
+        __all__= ['min_start_processing_length', 'location']
+        if len(arg) == 1:
+            for field_name in __all__:
+                setattr(self, field_name, arg[field_name]) 
 class Task_Worker_Manager():
     """
     Entry point of object
