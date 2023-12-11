@@ -8,7 +8,14 @@ class MyNullHandler(logging.Handler):
         pass
     def createLock(self):
         self.lock = None
-
+class worker_config(dict):
+    def __init__(self, *arg, **kwarg):
+        self.min_start_processing_length: int
+        self.location: str
+        __all__= ['min_start_processing_length', 'location']
+        if len(arg) == 1:
+            for field_name in __all__:
+                setattr(self, field_name, arg[field_name]) 
 # Remove the default StreamHandler from the root logger
 logging.getLogger().handlers.clear()
 
@@ -87,9 +94,11 @@ class Worker(ABC):
         if min_start_processing_length is None:
             min_start_processing_length = 4096
         self.min_start_processing_length = min_start_processing_length
-        
-        self.queue_pending = self.task_manager.worker_pending[self.id]
-        self.queue_dispatched = self.task_manager.worker_dispatched[self.id]
+        self.queue_pending = dictQueue(maxsize=50)
+        self.worker_manager.worker_pending[self.id] = self.queue_pending
+        self.queue_dispatched = dictQueue(maxsize=50)
+        self.worker_manager.worker_dispatched[self.id] = self.queue_dispatched
+        self.map_result_buffer = queue.Queue()
         self.stop_flag = threading.Event()
         self.graceful_stopped = threading.Event()
         self.worker_queue: Union[Worker_Sorter.worker_list, Worker_Sorter.removinged_worker_list]= self.worker_manager.worker_list
@@ -97,6 +106,27 @@ class Worker(ABC):
             self.queue_dispatched.not_full.notify()
         with self.queue_pending.not_full:
             self.queue_pending.not_full.notify()
+        def to_th_map():
+            while not self.stop_flag.is_set():
+                try:
+                    self.map()                        
+                except Exception as e:
+                    print(e)
+                    raise
+            self.logger.info(f'worker {self.id} th_map loop finish')
+        def to_th_reduce():
+            while not self.stop_flag.is_set():
+                try:
+                    self._map_result_watcher()
+                except Exception as e:
+                    print(e)
+                    raise
+            self.logger.info(f'worker {self.id} th_map_result_watch loop finish')
+        th_map_result_watch = threading.Thread(target = to_th_reduce, args = [],
+                                               name = f'{self.id} worker watcher')
+        self.th_map_result_watch = th_map_result_watch
+        th_map = threading.Thread(target = to_th_map, args = [], name=f'{self.id} worker map')
+        self.th_map = th_map
          # if set False, must implement mechanism to call _reduce
         # such as calling reduce at the end of dispatch
         
@@ -125,30 +155,9 @@ class Worker(ABC):
     
     def start(self):
         self.last_run = time.time() - self.min_time_lapse_ns / 1e9
-        def to_th_map():
-            while not self.stop_flag.is_set():
-                try:
-                    self.map()                        
-                except Exception as e:
-                    print(e)
-                    raise
-            self.logger.info(f'worker {self.id} th_map loop finish')
-
-        th_map = threading.Thread(target = to_th_map, args = [], name=f'{self.id} worker map')
-        th_map.start()
-        self.th_map = th_map
-        def to_th_reduce():
-            while not self.stop_flag.is_set():
-                try:
-                    self._map_result_watcher()
-                except Exception as e:
-                    print(e)
-                    raise
-            self.logger.info(f'worker {self.id} th_map_result_watch loop finish')
-        th_map_result_watch = threading.Thread(target = to_th_reduce, args = [],
-                                               name = f'{self.id} worker watcher')
-        th_map_result_watch.start()
-        self.th_map_result_watch = th_map_result_watch
+        self.th_map.start()
+        self.th_map_result_watch.start()
+        
     @abstractmethod
     def dispatch(self, *args, **kwargs):
         # by default, args will be task_info only in form of ((task_time, task, uuid), task_data )
@@ -225,14 +234,24 @@ class Worker(ABC):
         override this method to implement reduce behavour, default send back to task result queue
         """
         print(f"last step: {task_info} \nresults received with result type={type(map_result)}")
-        
+    @abstractmethod
+    def _parse_task_info(self):
+        return True
     
-    def _map_result_watcher(self, dispatch_result, task_info = None, **kwarg):
+    def _map_result_watcher(self, task_info = None, **kwarg):
         "watch_event_for_reduce, get map result and call _reduce at the end"
-        map_result = None
-        
+        while not self.stop_flag.is_set():
+            self.logger.debug('start listen map result')
+            from queue import Empty
+            try:
+                result = self.map_result_buffer.get(timeout=1)
+            except Empty:
+                continue
+            self.logger.debug('map result read')
+            success, task_info, map_result = self._parse_task_info(result)
+            if success:
+                self._reduce(map_result = map_result, task_info = task_info)
         return map_result
-    
     
     def _reduce(self, map_result, task_info,  *args, **kwargs  ): 
         self.reduce_called+=1
@@ -371,7 +390,7 @@ class Local_Thread_Producer_Sider_Worker(Worker):
         self.packet_cnt = 0
         self.n_max_task = 24
         self.task_queue = queue.Queue()
-        self.map_result_buffer = queue.Queue()
+        
         self.uuid_to_time : Dict[uuid.UUID, float] = {}
         self.th_worker : threading.Thread = threading.Thread(target = self._workload, name = 'thread-worker')
         self.min_time_lapse_ns = 6000
@@ -486,17 +505,7 @@ class Local_Thread_Producer_Sider_Worker(Worker):
         #to be overridden
         pass
     def _map_result_watcher(self):
-        while not self.stop_flag.is_set():
-            self.logger.debug('start listen map result')
-            from queue import Empty
-            try:
-                task_info, result = self.map_result_buffer.get(timeout=1)
-            except Empty:
-                continue
-            self.logger.debug('map result read')
-            success, task_info, map_result = self._parse_task_info(task_info, result)
-            if success:
-                self._reduce(map_result = map_result, task_info = task_info)
+        super()._map_result_watcher()
         self.logger.info(f'local thread result watch {threading.current_thread().ident} leaving loop')
     def _parse_task_info(self,task_info, result, *arg, **kwarg):
         uuid = task_info[1]
@@ -528,17 +537,17 @@ class Socket_Producer_Side_Worker(Worker):
         self.socket_last_run = None
         self.server_address = remote_info # eg example : ('localhost', 5000)
         self.client_socket = ReconnectingSocket(self.server_address)
-        self.client_socket.connect()
+        
         self.th_result_buffer_collect : threading.Thread
         self.th_map_result_watch: threading.Thread
         self.checksum_on = False
         self.socket_start_time = time.time()
         
-        self.map_result_buffer = queue.Queue()
         self.watermark = time.time()
         self.output_minibatch_size = 24
         self._send = MethodType(base_socket_worker._send, self)
     def start(self):
+        self.client_socket.connect()
         super().start()
         
         
@@ -617,18 +626,8 @@ class Socket_Producer_Side_Worker(Worker):
         # dispatch_result : same as map_result you pass to self._reduce
         return None
     def _map_result_watcher(self):
-        while not self.stop_flag.is_set():
-            self.logger.debug('start listen map result')
-            from queue import Empty
-            try:
-                result = self.map_result_buffer.get(timeout=1)
-            except Empty:
-                continue
-            self.logger.debug('map result read')
-            success, task_info, map_result = self._parse_task_info(result)
-            if success:
-                self._reduce(map_result = map_result, task_info = task_info)
-            
+        super()._map_result_watcher()
+        self.logger.info(f'socket thread result watch {threading.current_thread().ident} leaving loop')
     def _parse_task_info(self, single_buffer_result):
         "implement your own way such that: task_info = (time.time, messageuuid)"
         # response = lipsync_schema_pb2.ResponseData()
@@ -710,7 +709,8 @@ class Worker_Sorter():
         self.worker_list_lock = threading.Lock()
         self.removinged_worker_list_lock = threading.Lock()
         # alias
-        
+        self.worker_dispatched : Dict[int, dictQueue] = {}
+        self.worker_pending : Dict[int, dictQueue] = {}
         self.task_manager = task_manager
         self.logger = self.task_manager.logger
         self.task_retry_timeout = self.task_manager.task_retry_timeout
@@ -729,7 +729,9 @@ class Worker_Sorter():
     def get_worker(self, id = None, index_in_sorter = None):
         # get freest worker if both id and index_in_sorter is None
         return self.worker_list[0]
-    def add_worker(self, config):
+    def add_worker(self, config: worker_config):
+        if config is None:
+            config = {'location':'local', "min_start_processing_length":42}
         
         with self.worker_list_lock:
             new_worker = self.worker_factory(
@@ -745,16 +747,20 @@ class Worker_Sorter():
             #self.worker_list.append(new_worker)
             self.worker_by_id[self.new_worker_id] = new_worker
             self.new_worker_id += 1
-    def pop_worker(self, worker):
-
+    def pop_worker(self, worker: Worker):
+        if type(worker) is int: # assume passed worker id instead of worker obj
+            worker = self.worker_by_id[worker]
+        
         with self.worker_list_lock:
-            if worker in self.worker_list_lock:
-                assert worker is heappop(self.worker_list, worker.index_in_sorter)
+            if worker in self.worker_list:
                 # make sure the reference removed is itself
-            else:
                 with self.removinged_worker_list_lock:
                     heappush(self.removinged_worker_list, worker)
                     worker.worker_queue = self.removinged_worker_list
+                assert worker is heappop(self.worker_list, worker.index_in_sorter)
+            else:
+                raise(ValueError("Worker not found in _worker_sorter"))
+        return worker
     def get_task(self, task_id):
         # brutforce search task through each worker, not recommended
         # for high performance
@@ -874,7 +880,7 @@ def q_cond_wait(self: "Task_Worker_Manager", queue: queue.Queue, max_size: int):
             continue
         self.empty_waited_count += 1
         self.logger.debug(f"Task_manager.on_task_complete q size={self.q_task_completed._qsize()}")
-        
+
 class Task_Worker_Manager():
     """
     Entry point of object
@@ -917,8 +923,8 @@ class Task_Worker_Manager():
         self.worker_config = worker_config
         self.q_task_outstanding: OrderedDictQueue = ODictQueue(maxsize=50)  # pop first often, prioritize unoften, error re-enter from workign on
         self.q_task_completed = queue.PriorityQueue() # frames order is important to allow smooth streaming
-        self.worker_pending : Dict[int, dictQueue] = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
-        self.worker_dispatched : Dict[int, dictQueue] = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
+        self.worker_pending : Dict[int, dictQueue] # = {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
+        self.worker_dispatched : Dict[int, dictQueue] #= {id: dictQueue(maxsize=50) for id in range(self.n_worker)}
         self.worker_sorter_algo=worker_sorter_algo # [heapq, bincount]
         self.q_task_completed_limit = 1000
         self.th_assign = None
@@ -929,6 +935,8 @@ class Task_Worker_Manager():
         self.water_mark_lookback = 60
         self.watermark_check = False
         self._worker_sorter = self.worker_sorter_factory(sorting_algo = 'heapq', task_manager = self, worker_factory=worker_factory)
+        self.worker_pending = self._worker_sorter.worker_pending
+        self.worker_dispatched = self._worker_sorter.worker_dispatched
         self.worker_factory = self._worker_sorter.worker_factory
         self.init_locks()
         self.management_port = management_port
@@ -1124,7 +1132,6 @@ class Task_Worker_Manager():
                         self.q_task_completed.not_empty.notify()
             output_minibatch = self.output_minibatch(mini_batch_to_process)
                 
-from types import MethodType
 from pytaskqml.task_worker import myclient, base_socket_worker, Stop_Signal
 from queue import Queue, Empty
 class Socket_Input_Task_Worker_Manager(Task_Worker_Manager):
