@@ -102,7 +102,7 @@ def parse_data(data_with_checksum: bytes, checksum_on: bool):
         else:
             raise(DataCorruptionError('data corrupt'))
     else:
-        length = int(data_with_checksum[checksum_on*32:checksum_on*32+10])
+        length = int(data_with_checksum[checksum_on*32:checksum_on*32+10].decode())
         if len(data_with_checksum) < int(length) + checksum_on*32+10:
             raise DataIngressIncomplete('more data to come') # wait_for_more_data to come
         received_data = data_with_checksum[checksum_on*32+10:checksum_on*32+10+length]

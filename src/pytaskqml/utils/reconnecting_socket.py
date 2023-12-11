@@ -15,7 +15,6 @@ class ReconnectingSocket:
         self.th_reconnecting_watchdog = threading.Thread(
                     target = self.reconnecting_watchdog,
                     name = f'reconnecting_watchdog-{self.host}:{self.port}')
-        self.th_reconnecting_watchdog.start()
         self.last_reconnect_time = time.time()
         self.reconnect_interval = 2
         
@@ -41,6 +40,7 @@ class ReconnectingSocket:
                 self.reconnecting_needed.clear()
             self.reconnecting_lock.release()
     def connect(self):
+        self.th_reconnecting_watchdog.start()
         while self.retry_enabled:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
