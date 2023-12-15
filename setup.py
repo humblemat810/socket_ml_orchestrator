@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name='pysockettaskqml',
+    name='pytaskqml',
     version='1.0.0',
     description='python implemented task queue framework for websocket based machine learning streaming application',
     author='Peter Chan',
