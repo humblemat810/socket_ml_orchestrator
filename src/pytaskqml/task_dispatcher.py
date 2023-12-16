@@ -11,6 +11,7 @@ class MyNullHandler(logging.Handler):
 class worker_config(dict):
     def __init__(self, *arg, **kwarg):
         self.min_start_processing_length: int
+        self.min_return_processing_length: int
         self.location: str
         __all__= ['min_start_processing_length', 'location']
         if len(arg) == 1:
@@ -75,7 +76,7 @@ class task_info():
 
 class Worker(ABC):
     def __init__(self, id, worker_manager:"Worker_Sorter", pending_task_limit = 24  ,
-                 min_start_processing_length = None,
+                 min_start_processing_length = None, min_return_processing_length = None,
                  *arg, index_in_sorter = None, **kwarg):
         # initi connection
         # local = True, remote = None, 
@@ -94,6 +95,11 @@ class Worker(ABC):
         if min_start_processing_length is None:
             min_start_processing_length = 4096
         self.min_start_processing_length = min_start_processing_length
+        if min_return_processing_length is None:
+            min_return_processing_length = 4096
+        self.min_return_processing_length = min_return_processing_length
+
+        
         self.queue_pending = dictQueue(maxsize=50)
         self.worker_manager.worker_pending[self.id] = self.queue_pending
         self.queue_dispatched = dictQueue(maxsize=50)
@@ -587,7 +593,7 @@ class Socket_Producer_Side_Worker(Worker):
                     continue
                 data_with_checksum = data_with_checksum + data
                 self.logger.debug('worker data received')
-                while not self.stop_flag.is_set() and (len(data_with_checksum) >= self.min_start_processing_length):
+                while not self.stop_flag.is_set() and (len(data_with_checksum) >= self.min_return_processing_length):
                     try:
                         length, received_data, calculated_checksum = parse_data(data_with_checksum, checksum_on=checksum_on)
                     except DataIngressIncomplete as e:
@@ -733,7 +739,9 @@ class Worker_Sorter():
         return self.worker_list[0]
     def add_worker(self, config: worker_config):
         if config is None:
-            config = {'location':'local', "min_start_processing_length":42}
+            config = {'location':'local', 
+                      "min_start_processing_length":42, 
+                      "min_return_processing_length":42}
         
         with self.worker_list_lock:
             new_worker = self.worker_factory(
@@ -743,7 +751,8 @@ class Worker_Sorter():
                 remote_info = None if config['location'] == 'local' else config['location'],
                 index_in_sorter = len(self.worker_list),
                 worker_queue = self.worker_list,
-                min_start_processing_length = config.get("min_start_processing_length")
+                min_start_processing_length = config.get("min_start_processing_length"),
+                min_return_processing_length = config.get("min_return_processing_length")
             )
             heappush(self.worker_list, new_worker )
             #self.worker_list.append(new_worker)

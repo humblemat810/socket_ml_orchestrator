@@ -43,7 +43,9 @@ def dispatcher_side_worker_config_parser(config: configparser.ConfigParser, pars
             location, port = location
             location = (str(location),int(port))
         worker_config.append({"location": location,
-                            "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
+                            "min_start_processing_length": int(worker_section.get("min_start_processing_length")),
+                            "min_return_processing_length": int(worker_section.get("min_return_processing_length"))
+                            
                             })
         i+=1
         if parsed_args.n_worker is not None:
@@ -55,7 +57,8 @@ def dispatcher_side_worker_config_parser(config: configparser.ConfigParser, pars
         while i <= parsed_args.n_worker:
             port = str(int(port) + 1)
             worker_config.append({"location": (str(location),int(port)),
-                            "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
+                            "min_start_processing_length": int(worker_section.get("min_start_processing_length")),
+                            "min_return_processing_length": int(worker_section.get("min_return_processing_length"))
                             })
             i+=1
     return worker_config
