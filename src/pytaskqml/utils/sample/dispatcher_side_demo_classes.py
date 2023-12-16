@@ -55,7 +55,7 @@ class my_word_count_local_producer_side_worker(Local_Thread_Producer_Sider_Worke
         # Split the string using the pattern as the delimiter
         cnt = Counter(re.split(pattern, task_data))
         return cnt
-        
+    
 class my_word_count_socket_producer_side_worker(Socket_Producer_Side_Worker):
     
     def _parse_task_info(self, single_buffer_result):

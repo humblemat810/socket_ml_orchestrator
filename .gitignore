@@ -3,3 +3,4 @@
 *.sqlite
 *.pyc
 *.log
+src/pytaskqml/utils/sample/demo_case8/.democase8venv/*

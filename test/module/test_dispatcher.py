@@ -54,33 +54,46 @@ def test_socket_worker_collect(manager_single_socket_worker: Task_Worker_Manager
     assert server_side_socket_worker.map_result_buffer.queue[0].decode() == 'hello'
     
 from types import MethodType
-def test_parse_task_info_reduce(manager_single_socket_worker: Task_Worker_Manager):
-    
-    only_worker: Socket_Producer_Side_Worker = manager_single_socket_worker._worker_sorter.worker_by_id[0]
-    
-    cnt = 0
-    from collections import namedtuple
-    def monkey_patch_counter(self, result):
-        nonlocal cnt
-        assert result == b'helloworld'
-        Parsed_Task_Info = namedtuple("Parsed_Task_Info", ['success', 'task_info', 'map_result'])
-        cnt += 1
-        return Parsed_Task_Info(success=True, task_info= 'hello', map_result=  b'helloworld')
+import pytaskqml.task_dispatcher as task_dispatcher
+import inspect
+from typing import List
+members = inspect.getmembers(task_dispatcher)
+from abc import ABCMeta
+
+@pytest.fixture()
+def manager_with_each_worker():
+    mt_task_manager = empty_task_manager()
+    mt_task_manager._worker_sorter.add_worker({'location':("localhost",12345), "min_start_processing_length":1})
+    mt_task_manager._worker_sorter.add_worker({'location':"local", "min_start_processing_length":1})
+    return mt_task_manager
+# classes = [i for i in members if inspect.isclass(i[1])]
+# dispatcher_side_worker_subclasses : List[Worker] = [i[1] for i in classes if issubclass(i[1], Worker) and i[1] is not Worker]
+# @pytest.mark.parametrize("myworker_class", dispatcher_side_worker_subclasses)
+def test_parse_task_info_reduce(manager_with_each_worker: Task_Worker_Manager):
+    for id, myworker in manager_with_each_worker._worker_sorter.worker_by_id.items():
+        cnt = 0
+        from collections import namedtuple
+        def monkey_patch_counter(self, result):
+            nonlocal cnt
+            assert result == b'helloworld'
+            Parsed_Task_Info = namedtuple("Parsed_Task_Info", ['success', 'task_info', 'map_result'])
+            cnt += 1
+            return Parsed_Task_Info(success=True, task_info= 'hello', map_result=  b'helloworld')
+            
+        myworker._parse_task_info = MethodType(monkey_patch_counter, myworker) 
+        myworker.map_result_buffer.put(b'helloworld')
         
-    only_worker._parse_task_info = MethodType(monkey_patch_counter, only_worker) 
-    only_worker.map_result_buffer.put(b'helloworld')
-    
-    cnt2 = 0
-    def monkey_patch_counter2(self, map_result, task_info):
-        nonlocal cnt2
-        assert map_result == b'helloworld'
-        assert task_info == 'hello'
-        cnt2 += 1
-    only_worker._reduce = MethodType(monkey_patch_counter2, only_worker)
-    only_worker.th_map_result_watch.start()
-    time.sleep(1)
-    only_worker.stop_flag.set()
-    
-    assert cnt == 1
-    assert cnt2 == 1
+        cnt2 = 0
+        def monkey_patch_counter2(self, map_result, task_info):
+            nonlocal cnt2
+            assert map_result == b'helloworld'
+            assert task_info == 'hello'
+            cnt2 += 1
+        myworker._reduce = MethodType(monkey_patch_counter2, myworker)
+        myworker.th_map_result_watch.start()
+        time.sleep(1)
+        myworker.stop_flag.set()
+        
+        assert cnt == 1
+        assert cnt2 == 1
     
