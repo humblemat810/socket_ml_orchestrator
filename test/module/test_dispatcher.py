@@ -37,8 +37,9 @@ def test_socket_worker_collect(manager_single_socket_worker: Task_Worker_Manager
         client_socket.send('0000000005hello'.encode())
     # th_ssr = threading.Thread(target = send_sample_response)
     # th_ssr.start()
-    threading.Thread(target = send_sample_response).start()
+    threading.Thread(target = send_sample_response, name='send sample request').start()
     server_side_socket_worker: Socket_Producer_Side_Worker= manager_single_socket_worker._worker_sorter.worker_by_id[0]
+    server_side_socket_worker.min_return_processing_length = 10
     server_side_socket_worker.client_socket.connect()
     time.sleep(0.5)
     def result_buffer_collect():
@@ -46,7 +47,7 @@ def test_socket_worker_collect(manager_single_socket_worker: Task_Worker_Manager
     th = threading.Thread(target = result_buffer_collect, name = 'test_result_buffer_collect')
     th.start()
     
-    time.sleep(0.5)
+    time.sleep(1.5)
     server_side_socket_worker.stop_flag.set()
     server_side_socket_worker.client_socket.retry_enabled = False
     server_socket.close()
