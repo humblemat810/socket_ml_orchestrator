@@ -467,9 +467,11 @@ class Local_Thread_Producer_Sider_Worker(Worker):
             if self.stop_flag.is_set():
                 continue
             logging.debug(f'local worker{self.id} task q now not empty')
-            task_info, task_data = self.task_queue._get()
-            self.task_queue.not_full.notify()
-            self.task_queue.mutex.release()
+            try:
+                task_info, task_data = self.task_queue._get()
+                self.task_queue.not_full.notify()
+            finally:
+                self.task_queue.mutex.release()
             self.uuid_to_time[task_info[1]] = task_info[0]
             # worker.workload
             result = self.workload(task_info,task_data)
