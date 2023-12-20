@@ -34,11 +34,11 @@ from .utils.reconnecting_socket import ReconnectingSocket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 debug = True
 class base_worker():
-    def __init__():
+    def __init__(self):
         pass
-    def handle_send():
+    def handle_send(self):
         pass
-    def handle_receive():
+    def handle_receive(self):
         pass
     pass
 class Stop_Signal():
@@ -155,7 +155,7 @@ class base_socket_worker(base_worker):
         self.last_run = cur_time
     
     
-    def send(self,client: myclient, data):
+    def send(self, client: myclient = None, data = None):
         client.send_queue.put(data)
     def handle_send(self, client: myclient):
         self.logger.debug(f"client {client.id} handle_send start")
@@ -208,7 +208,7 @@ class base_socket_worker(base_worker):
         
         print(f"client {client.id} exited handle_send while loop")
         client.handle_send_exiting.set()
-    def workload(self):
+    def workload(self, *arg, **kwarg):
         # implement data deserialising and processing here
         pass
     def handle_workload(self, client:myclient):

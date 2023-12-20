@@ -1,0 +1,3 @@
+[submodule "src/pytaskqml/utils/sample/demo_case8"]
+	path = src/pytaskqml/utils/sample/demo_case8
+	url = https://github.com/humblemat810/pytaskqml.utils.sample.demo_case8
