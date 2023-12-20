@@ -68,13 +68,15 @@ def test_worker_side_worker_workload():
     #             my_socket_worker)
     my_socket_worker.send = count_calls(my_socket_worker.send)
     import threading
-    threading.Thread(target = my_socket_worker.start).start()
+    th = threading.Thread(target = my_socket_worker.start)
+    th.start()
     from pytaskqml.utils.reconnecting_socket import ReconnectingSocket
     mysock = ReconnectingSocket(("localhost", 5000))
+    from pytaskqml.task_worker import Stop_Signal
     try:
         mysock.connect()
         import time
-        time.sleep(2)
+        time.sleep(0.5)
         my_socket_worker.client_dict[0].received_parsed_queue.mutex.acquire()
         my_socket_worker.client_dict[0].send_queue.mutex.acquire()
         assert len(my_socket_worker.client_dict[0].received_parsed_queue.queue) == 0
@@ -88,10 +90,18 @@ def test_worker_side_worker_workload():
         assert(my_socket_worker.send.calls == 1)
         my_socket_worker.client_dict[0].send_queue.mutex.release()
         time.sleep(0.5)
-        assert len(my_socket_worker.client_dict[0].send_queue) == 0
+        assert ((len(my_socket_worker.client_dict[0].send_queue.queue) == 0 ) or 
+                my_socket_worker.client_dict[0].send_queue.queue[0] is Stop_Signal)
+        import requests
+        requests.get('http://localhost:18464/shutdown')
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
+        mysock.retry_enabled = False
         mysock.close()
-
-    my_socket_worker.client_dict[0].send_queue.mutex.release()
+    th.join(timeout=1)
+    assert not th.is_alive()
     assert(my_socket_worker.send.calls == 1)
     assert True
