@@ -84,6 +84,16 @@ class DataIngressIncomplete(BaseException):
     pass
 class DataCorruptionError(BaseException):
     pass
+def peek_next_len(data_with_checksum, checksum_on):
+    if checksum_on:
+        if len(data_with_checksum) < 44:
+            raise DataIngressIncomplete
+        next_len = data_with_checksum[34:44].decode()
+    else:
+        if len(data_with_checksum) < 10:
+            raise DataIngressIncomplete
+        next_len = int(data_with_checksum[:10].decode())
+    return next_len
 def parse_data(data_with_checksum: bytes, checksum_on: bool):
     if checksum_on:
         hash_algo = hashlib.md5()
@@ -151,7 +161,7 @@ class base_socket_worker(base_worker):
         else:
             checksum = "".encode()
         client_socket.sendall(checksum + length + serialized_data)
-        self.logger.info('succeed')
+        self.logger.info('_send succeed')
         self.last_run = cur_time
     
     
@@ -242,6 +252,7 @@ class base_socket_worker(base_worker):
         socket_last_run = time.time()
         self.socket_start_time = time.time()
         cnt = 0
+        next_len = None
         while not client.stop_event.is_set():
             try:
                 # readable, _, _ = select.select([client_socket], [], [])
@@ -251,11 +262,14 @@ class base_socket_worker(base_worker):
                 #     pass
                 self.logger.debug(f"client {client.id} handle_receive socket receive waiting")
                 try:
-                    if self.min_start_processing_length:
+                    if next_len:
+                        data = client.client_socket.recv(next_len+checksum_on*32+10 - len(data_with_checksum))
+                    elif self.min_start_processing_length:
                         data = client.client_socket.recv(self.min_start_processing_length)
                     else:
                         data = client.client_socket.recv(4096)
                 except socket.timeout:
+                    self.logger.debug(f"client {client.id} handle_receive socket receive timeout")
                     continue
                 data_with_checksum = data_with_checksum + data
                 self.logger.debug(f"client {client.id} handle_receive socket received len{len(data_with_checksum)}")
@@ -267,6 +281,8 @@ class base_socket_worker(base_worker):
                     self.logger.debug(f"client {client.id} handle_receive checking data integrity")
                     
                     try:
+                        if next_len is None:
+                            next_len = peek_next_len(data_with_checksum, checksum_on= self.checksum_on)
                         length, received_data, calculated_checksum = parse_data(data_with_checksum, checksum_on= self.checksum_on)
                         time_now =  time.time() 
                         
@@ -277,6 +293,7 @@ class base_socket_worker(base_worker):
                         client.client_socket.close()
                         break
                     data_with_checksum = data_with_checksum[checksum_on*32+10+length:]
+                    next_len = None
                     while not client.stop_event.is_set():
                         try:
                             if self.ingress_lock_on:
@@ -292,7 +309,7 @@ class base_socket_worker(base_worker):
                     cnt += 1
                     uptime = time_now- self.socket_start_time
                     uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
-                    logging.info(f'uptime: {uptime_str}, correct packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
+                    self.logger.info(f'uptime: {uptime_str}, correct packet no: {cnt}, checksum correct calculated_checksum={calculated_checksum}')
                     
                     socket_last_run = time_now
                 
@@ -399,7 +416,7 @@ class base_socket_worker(base_worker):
             if is_server:
                 try:
                     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+                    self.server_socket.settimeout(5.0)
                     self.server_socket.bind(self.server_address)
                     self.logger.info("start socket server started")
                     

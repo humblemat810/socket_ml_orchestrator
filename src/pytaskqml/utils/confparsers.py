@@ -56,7 +56,7 @@ def dispatcher_side_worker_config_parser(config: configparser.ConfigParser, pars
     if parsed_args.n_worker is not None:
         while i <= parsed_args.n_worker:
             port = str(int(port) + 1)
-            worker_config.append({"location": (str(location),int(port)),
+            worker_config.append({"location": (str(location[0]),int(port)),
                             "min_start_processing_length": int(worker_section.get("min_start_processing_length")),
                             "min_return_processing_length": int(worker_section.get("min_return_processing_length"))
                             })

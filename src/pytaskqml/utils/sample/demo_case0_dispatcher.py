@@ -1,4 +1,7 @@
 
+import threading
+threading.current_thread().name = "demo_case0_dispatcher.py"
+
 import argparse
 parser = argparse.ArgumentParser(description="Demo server side for")
 parser.add_argument('--management-port', type=str, help='Management Port number', dest = 'management_port', default="8000")
@@ -30,28 +33,7 @@ if type(log_screen) is str:
         log_screen = True
     else:
         raise ValueError(f"incorrect config for log_screen, expected UNION[FALSE, TRUE], get {log_screen}")
-# worker_config = []
-# i = 1
-# while f'worker.{i}' in config:
-#     worker_section = config[f'worker.{i}']
-#     location = worker_section['location']
-#     location, port = location.split(':')
-#     worker_config.append({"location": (str(location),int(port)),
-#                           "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
-#                           })
-#     i+=1
-#     if args.n_worker is not None:
-#         if i <= args.n_worker:
-#             continue
-#         else:
-#             break
-# if args.n_worker is not None:
-#     while i <= args.n_worker:
-#         port = str(int(port) + 1)
-#         worker_config.append({"location": (str(location),int(port)),
-#                           "min_start_processing_length": int(worker_section.get("min_start_processing_length"))
-#                           })
-#         i+=1
+
 from pytaskqml.utils.confparsers import dispatcher_side_worker_config_parser
 worker_config = dispatcher_side_worker_config_parser(config=config, parsed_args= args)
 import logging
@@ -70,10 +52,8 @@ if log_screen:
     console_handler.setFormatter(formatter)
 
     logger.addHandler(console_handler)
-# fh = logging.FileHandler('demo_case1.log', mode='w', encoding='utf-8')
-# fh.setLevel(log_level)
-# fh.setFormatter(formatter)
-# logger.addHandler(fh)
+
+
 from pytaskqml.utils.logutils import QueueFileHandler
 log_file_name = config.get("logger", "file")
 qfh = QueueFileHandler(log_file_name)
@@ -82,23 +62,20 @@ qfh.setFormatter(formatter)
 logger.addHandler(qfh)
 import pytaskqml.task_dispatcher as task_dispatcher
 task_dispatcher.modulelogger = logger
-from dispatcher_side_demo_classes import my_word_count_socket_producer_side_worker, my_word_count_dispatcher
-import threading
+from dispatcher_side_demo_classes import my_echo_socket_producer_side_worker, my_echo_dispatcher
+
 import time
+
 def main():
-    # worker_config = [#{"location": "local"},
-    #                  {"location": ('localhost', 12345), 
-    #                   "min_start_processing_length" : 42}, 
-    #                 ]
     import sys
     print(sys.modules[__name__])
-    my_task_worker_manager = my_word_count_dispatcher(
-                worker_factory=my_word_count_socket_producer_side_worker, 
+    my_task_worker_manager = my_echo_dispatcher(
+                worker_factory=my_echo_socket_producer_side_worker, 
                 worker_config = worker_config,
-                output_minibatch_size = 24,
+                output_minibatch_size = 2,
                 management_port = management_port,
                 logger = logger,
-                retry_watcher_on = True
+                retry_watcher_on = False
             )
     
     th = threading.Thread(target = my_task_worker_manager.start, args = [])
@@ -112,6 +89,7 @@ def main():
         cnt = 0
         last_run = time.time()
         while not my_task_worker_manager.stop_flag.is_set():
+            logger.debug(f'inter-dispatch sleep actually takes {time.time() - last_run}')
             cnt+=1
             import random
             words = ["apple", "banana", "cherry", "orange", "grape", "kiwi"]
@@ -123,6 +101,7 @@ def main():
             now_time = time.time()
             logger.debug(f'__main__ : cnt {cnt} added, interval = {now_time - last_run}')
             last_run = now_time
+            time.sleep(0.001)
 
     th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()
