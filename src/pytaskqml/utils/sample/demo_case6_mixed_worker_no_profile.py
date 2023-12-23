@@ -24,7 +24,7 @@ def run_worker(i_worker = 0):
     # Define the arguments for the first Python file
     args_file1 = ["python",
                   #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
-                  r"demo_case1_wordcount_worker.py", "--port", str(12345 + i_worker), "--management-port", str(22345+0), "--config", 'worker.ini']
+                  r"demo_case1_wordcount_worker.py", "--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
     p = subprocess.call(args_file1)
     print(f'worker {i_worker} subprocess done with return code {p}')
 

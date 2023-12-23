@@ -44,14 +44,22 @@ class ReconnectingSocket:
             except RuntimeError as e:
                 e
     def connect(self):
-        self.th_reconnecting_watchdog.start()
+        if not self.th_reconnecting_watchdog.is_alive():
+            self.th_reconnecting_watchdog = threading.Thread(
+                    target = self.reconnecting_watchdog,
+                    name = f'reconnecting_watchdog-{self.host}:{self.port}')
+            self.th_reconnecting_watchdog.start()
+
         while self.retry_enabled:
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(5.0)
                 self.sock.connect((self.host, self.port))
                 print("Socket connected successfully")
                 break  # Exit the loop if connection is successful
             except socket.error as e:
+                import traceback
+                traceback.print_exc()
                 print(e)
                 print("Socket connection failed. Retrying in 1 second...")
                 
@@ -66,7 +74,7 @@ class ReconnectingSocket:
             except socket.error as se:
                 print("Socket send failed. Reconnecting...")
                 #self.connect()
-                if type(se) is TimeoutError:
+                if type(se) is socket.timeout:
                     # ok, no data in yet
                     continue
                 with self.reconnecting_lock:
@@ -79,7 +87,7 @@ class ReconnectingSocket:
                 #print("Data received successfully\n")
                 return data  # Exit the loop and return received data
             except socket.error as se:
-                if type(se) is TimeoutError:
+                if type(se) is socket.timeout:
                     # ok, no data in yet
                     continue
                 print("Socket receive failed. Reconnecting...")

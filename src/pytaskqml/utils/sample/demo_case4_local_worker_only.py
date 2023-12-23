@@ -24,7 +24,7 @@ def run_worker(i_worker = 0):
     # Define the arguments for the first Python file
     args_file1 = ["python",'yappi_main_wrapper.py', 
                   #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
-                  r"demo_case1_wordcount_worker.main", f"worker{12345+i_worker}", "--port", str(12345 + i_worker), "--management-port", str(22345+0), "--config", 'worker.ini']
+                  r"demo_case1_wordcount_worker.main", f"worker{12345+i_worker}", "--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
     subprocess.call(args_file1)
 
 def run_dispatcher(n_worker):

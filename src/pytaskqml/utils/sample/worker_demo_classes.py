@@ -1,13 +1,31 @@
 from pytaskqml.task_worker import base_socket_worker
-
+import pickle
+from pytaskqml.utils.sample.serialisers.plain_string_message_pb2 import MyMessage
 class echo_worker(base_socket_worker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_proto = True
     def workload(self, received_data):
-        from pytaskqml.utils.sample.serialisers.plain_string_message_pb2 import plain_string_message_pb2
-        request_array = plain_string_message_pb2.MyMessage()
-        request_array.ParseFromString(received_data)
-        request_array.my_field = "hello" + request_array.my_field
-        response_data_array = request_array
-        serialized_data = response_data_array.SerializeToString()
+        import time
+        start_time = time.time()
+        if self.use_proto:
+        
+        
+            request_array = MyMessage()
+            request_array.ParseFromString(received_data)
+            
+            
+            response_data = MyMessage()
+            response_data.strmessage = "hello" + request_array.strmessage
+            response_data.messageuuid = request_array.messageuuid
+            serialized_data = response_data.SerializeToString()
+        else:
+        ##################===========
+            deserialised_data = pickle.loads(received_data)
+            deserialised_data['strmessage'] =  "hello" + deserialised_data['strmessage']
+            serialized_data = pickle.dumps(deserialised_data)
+            end_time = time.time()
+            self.logger.debug(f"workload takes time {end_time - start_time}")
         return serialized_data
     
 class char_count_worker(base_socket_worker):
