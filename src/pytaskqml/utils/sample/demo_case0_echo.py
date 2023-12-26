@@ -61,6 +61,8 @@ def main():
         process1.join()
         process2.join()
     print('done')
+    import sys
+    sys.exit(0)
 if __name__ == "__main__":
     main()
     
