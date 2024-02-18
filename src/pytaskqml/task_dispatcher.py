@@ -746,6 +746,7 @@ class Worker_Sorter():
 
         
     def update_sort(self, worker:Worker, index_in_sorter: int, change : int):
+        "change worker priorities in the priority queue of workers"
         if change > 0:
             _siftup(worker.worker_queue, index_in_sorter)
         else:
@@ -774,20 +775,39 @@ class Worker_Sorter():
             #self.worker_list.append(new_worker)
             self.worker_by_id[self.new_worker_id] = new_worker
             self.new_worker_id += 1
-    def pop_worker(self, worker: Worker):
+    def swap_worker(self, worker: Worker, 
+                    worker_list_from, worker_list_from_lock, 
+                    worker_list_to, worker_list_to_lock):
+        'swap 2 worker in 2 worker list with lock mechanism'
         if type(worker) is int: # assume passed worker id instead of worker obj
             worker = self.worker_by_id[worker]
         
-        with self.worker_list_lock:
-            if worker in self.worker_list:
+        with worker_list_from_lock:
+            if worker in worker_list_from:
                 # make sure the reference removed is itself
-                with self.removinged_worker_list_lock:
-                    heappush(self.removinged_worker_list, worker)
-                    worker.worker_queue = self.removinged_worker_list
-                assert worker is heappop(self.worker_list, worker.index_in_sorter)
+                with worker_list_to_lock:
+                    heappush(worker_list_to, worker)
+                    worker.worker_queue = worker_list_to
+                assert worker is heappop(worker_list_from, worker.index_in_sorter)
             else:
                 raise(ValueError("Worker not found in _worker_sorter"))
         return worker
+    def pop_worker(self, worker: Worker):
+        'put worker in the removinged worker list'
+
+        return self.swap_worker(worker, 
+                                self.worker_list, self.worker_list_lock,
+                                self.removinged_worker_list, self.removinged_worker_list_lock
+                                )
+    def rejoin_worker(self, worker: Worker):
+        """a worker that is removed from active worker may be rejoining the worker lists
+        e.g. network interruption ended
+        """
+        return self.swap_worker(worker, 
+                                self.removinged_worker_list, self.removinged_worker_list_lock,
+                                self.worker_list, self.worker_list_lock
+                                )
+
     def get_task(self, task_id):
         # brutforce search task through each worker, not recommended
         # for high performance

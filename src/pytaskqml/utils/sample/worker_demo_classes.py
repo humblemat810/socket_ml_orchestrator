@@ -4,7 +4,7 @@ from pytaskqml.utils.sample.serialisers.plain_string_message_pb2 import MyMessag
 class echo_worker(base_socket_worker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.use_proto = True
+        self.use_proto = False
     def workload(self, received_data):
         import time
         start_time = time.time()

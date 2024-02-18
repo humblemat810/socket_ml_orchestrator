@@ -25,7 +25,7 @@ from pytaskqml.utils.sample.serialisers.plain_string_message_pb2 import MyMessag
 class my_echo_socket_producer_side_worker(Socket_Producer_Side_Worker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.use_proto = True
+        self.use_proto = False
     def parse_task_info(self, single_buffer_result):
         if self.use_proto:
         
