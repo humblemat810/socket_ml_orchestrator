@@ -16,7 +16,7 @@ class my_echo_dispatcher(Task_Worker_Manager):
     def send_output(self, fresh_output_minibatch):
         for task_info, data in fresh_output_minibatch:
             self.result_cnt+=1
-            print(data)
+            #print(data)
     def on_shutdown(self):
         print(self.result_cnt)
         return super().on_shutdown()

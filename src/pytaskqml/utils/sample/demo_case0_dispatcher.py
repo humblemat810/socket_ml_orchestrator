@@ -101,7 +101,7 @@ def main():
             now_time = time.time()
             logger.debug(f'__main__ : cnt {cnt} added, interval = {now_time - last_run}')
             last_run = now_time
-            time.sleep(0.001)
+            #time.sleep(0.001)
 
     th = threading.Thread(target = dispatch_from_main, args = [], name='dispatch_from_main')
     th.start()

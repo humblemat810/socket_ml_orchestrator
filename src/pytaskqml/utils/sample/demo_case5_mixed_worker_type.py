@@ -22,17 +22,15 @@ import subprocess
 import pathlib
 def run_worker(i_worker = 0):
     # Define the arguments for the first Python file
-    args_file1 = ["python",'yappi_main_wrapper.py', 
-                  #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
-                  r"demo_case1_wordcount_worker.main", f"worker{12345+i_worker}", "--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
+    args_file1 = ["python",
+                  r"demo_case1_wordcount_worker.py", "--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
     p = subprocess.call(args_file1)
     print(f'worker {i_worker} subprocess done with return code {p}')
 
 def run_dispatcher(n_worker):
     # Define the arguments for the second Python file
-    args_file2 = ["python",'yappi_main_wrapper.py', 
-                  #'-o', str((pathlib.Path(".")/'dispatcher.ystat').resolve()), 
-                  r"demo_case4_dispatcher.main", 'dispatcher',"--management-port", "18000", "--config", 'dispatcher_case5.ini', '--n-worker', f"{n_worker}"]
+    args_file2 = ["python",
+                  r"demo_case4_dispatcher.py","--management-port", "18000", "--config", 'dispatcher_case5.ini', '--n-worker', f"{n_worker}"]
     subprocess.call(args_file2)
     p = subprocess.call(args_file2)
     print(f'dispatcher with {n_worker} workers done with return code {p}')

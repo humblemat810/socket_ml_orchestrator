@@ -1,19 +1,17 @@
 import multiprocessing
 import subprocess
-
+import sys
 import pathlib
 def run_worker(i_worker = 0):
     # Define the arguments for the first Python file
-    args_file1 = ["python",'yappi_main_wrapper.py', 
-                  #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
-                  r"demo_case1_wordcount_worker.main", f"worker{12345+i_worker}", "--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
+    args_file1 = [sys.executable,
+                  r"demo_case1_wordcount_worker.py","--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
     subprocess.call(args_file1)
 
 def run_dispatcher(n_worker):
     # Define the arguments for the second Python file
-    args_file2 = ["python",'yappi_main_wrapper.py', 
-                  #'-o', str((pathlib.Path(".")/'dispatcher.ystat').resolve()), 
-                  r"demo_case1_dispatcher.main", 'dispatcher',"--management-port", "18000", "--config", 'dispatcher_case2.ini', '--n-worker', f"{n_worker}"]
+    args_file2 = [sys.executable,
+                  r"demo_case1_dispatcher.py","--management-port", "18000", "--config", 'dispatcher_case2.ini', '--n-worker', f"{n_worker}"]
     subprocess.call(args_file2)
 
 import os
@@ -99,18 +97,18 @@ def main(n_worker = 1):
 
     print('done')
 if __name__ == "__main__":
-    import yappi
-    yappi.set_clock_type("WALL")
-    yappi.start()
+    # import yappi
+    # yappi.set_clock_type("WALL")
+    # yappi.start()
     main(n_worker= 3)
-    yappi.stop()
-    import pytaskqml
-    from pytaskqml import task_dispatcher, task_worker
-    stats0 = yappi.get_thread_stats()
-    print('func_stats')
-    stats = yappi.get_func_stats(
-        filter_callback=lambda x: yappi.module_matches(x, [pytaskqml, task_dispatcher, task_worker])
-    )
-    stats0.print_all()
-    stats.print_all()
-    print('temp')
+    # yappi.stop()
+    # import pytaskqml
+    # from pytaskqml import task_dispatcher, task_worker
+    # stats0 = yappi.get_thread_stats()
+    # print('func_stats')
+    # stats = yappi.get_func_stats(
+    #     filter_callback=lambda x: yappi.module_matches(x, [pytaskqml, task_dispatcher, task_worker])
+    # )
+    # stats0.print_all()
+    # stats.print_all()
+    # print('temp')

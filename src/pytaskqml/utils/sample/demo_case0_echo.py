@@ -1,14 +1,14 @@
 import multiprocessing
 import subprocess
-
+import sys
 def run_worker():
     # Define the arguments for the first Python file
-    args_file1 = ["python", r"demo_case0_echo_worker.py", "--port", "12345", "--management-port", "22345", "--config", 'worker0.ini']
+    args_file1 = [sys.executable, r"demo_case0_echo_worker.py", "--port", "12345", "--management-port", "22345", "--config", 'worker0.ini']
     subprocess.call(args_file1)
 
 def run_dispatcher():
     # Define the arguments for the second Python file
-    args_file2 = ["python", r"demo_case0_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher_case0.ini']
+    args_file2 = [sys.executable, r"demo_case0_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher_case0.ini']
     subprocess.call(args_file2)
 import os
 
@@ -46,14 +46,20 @@ def main():
                 try:
                     requests.get('http://localhost:18000/shutdown', timeout = 5)
                 except:
-                    continue
+                    if process2.is_alive():
+                        continue
+                    else:
+                        return
                 return
         def shutdown_worker():
             while True:
                 try:
                     requests.get('http://localhost:22345/shutdown', timeout = 5)
                 except:
-                    continue
+                    if process1.is_alive():
+                        continue
+                    else:
+                        return
                 return
         threading.Thread(target = shutdown_server).start() # worker
         threading.Thread(target = shutdown_worker).start()

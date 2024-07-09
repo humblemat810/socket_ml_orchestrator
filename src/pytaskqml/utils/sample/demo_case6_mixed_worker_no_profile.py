@@ -18,11 +18,11 @@ logging.getLogger().addHandler(null_handler)
 
 import multiprocessing
 import subprocess
-
+import sys
 import pathlib
 def run_worker(i_worker = 0):
     # Define the arguments for the first Python file
-    args_file1 = ["python",
+    args_file1 = [sys.executable,
                   #'-o', str((pathlib.Path(".")/'worker12345.ystat').resolve()),  
                   r"demo_case1_wordcount_worker.py", "--port", str(12345 + i_worker), "--management-port", str(22345+i_worker), "--config", 'worker.ini']
     p = subprocess.call(args_file1)
@@ -30,7 +30,7 @@ def run_worker(i_worker = 0):
 
 def run_dispatcher(n_worker):
     # Define the arguments for the second Python file
-    args_file2 = ["python" ,
+    args_file2 = [sys.executable ,
                   #'-o', str((pathlib.Path(".")/'dispatcher.ystat').resolve()), 
                   r"demo_case4_dispatcher.py", "--management-port", "18000", "--config", 'dispatcher_case5.ini', '--n-worker', f"{n_worker}"]
     p = subprocess.call(args_file2)

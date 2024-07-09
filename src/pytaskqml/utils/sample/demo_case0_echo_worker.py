@@ -54,13 +54,15 @@ logger = logging.getLogger(f"server_ml_echo_worker-{port}")
 logger.setLevel(log_level)
 
 # Create a console handler and set its format
-console_handler = logging.StreamHandler()
+
 #formatter = logging.Formatter("%(levelname)s - %(message)s")
 formatter = logging.Formatter("%(asctime)s - %(filename)s - %(lineno)d - %(levelname)s - %(message)s")
-console_handler.setFormatter(formatter)
 
 # Add the console handler to the logger
 if log_screen:
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
     logger.addHandler(console_handler)
 
 

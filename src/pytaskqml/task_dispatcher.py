@@ -147,7 +147,10 @@ class Worker(ABC):
     
     def graceful_stop(self):
         self.stop_flag.set()
-        self.th_map.join()
+
+        while not self.th_map._started.isSet():
+            time.sleep(2)
+            self.th_map.join()
         self.graceful_stopped.set()
     def get_next_task(self):
         return self.queue_pending._first()
